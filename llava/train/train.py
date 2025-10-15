@@ -112,18 +112,37 @@ class TrainingArguments(transformers.TrainingArguments):
     group_by_modality_length: bool = field(default=False)
 
 
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+def maybe_zero_3(param, ignore_status: bool = False, name: str = None):
+    """
+    Return a CPU copy of `param`, handling both DeepSpeed ZeRO-3 and vanilla PyTorch.
+
+    If DeepSpeed is available *and* the parameter is ZeRO-sharded, gather it first.
+    Otherwise just detach().cpu().clone().
+    """
+    # Try DeepSpeed imports, but don't require them.
+    try:
+        from deepspeed import zero
+        from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+        _has_ds = True
+    except Exception:
+        zero = None
+        ZeroParamStatus = None
+        _has_ds = False
+
+    if _has_ds and hasattr(param, "ds_id"):
+        # Under ZeRO, parameters may be partitioned; gather before saving.
+        ds_status = getattr(param, "ds_status", None)
+        if ds_status == getattr(ZeroParamStatus, "NOT_AVAILABLE", None):
             if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
+                logging.warning(
+                    f"{name}: param.ds_status != AVAILABLE (status: {ds_status})."
+                )
+        # Safely gather to a single rank then clone to CPU
         with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
+            return param.data.detach().cpu().clone()
     else:
-        param = param.detach().cpu().clone()
-    return param
+        # No DeepSpeed/ZeRO: just return a CPU copy
+        return param.detach().cpu().clone()
 
 
 # Borrowed from peft.utils.get_peft_model_state_dict
@@ -821,6 +840,14 @@ def train(attn_implementation=None):
                 model_args.model_name_or_path,
                 config=config,
                 cache_dir=training_args.cache_dir,
+                **bnb_model_from_pretrained_args
+            )
+        elif 'mistral' in model_args.model_name_or_path:
+            model = LlavaMistralForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
         else:

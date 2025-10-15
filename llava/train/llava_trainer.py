@@ -15,18 +15,47 @@ from transformers.trainer import (
 from typing import List, Optional
 
 
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(name, 'no ignore status')
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
+# def maybe_zero_3(param, ignore_status=False, name=None):
+#     from deepspeed import zero
+#     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+#     if hasattr(param, "ds_id"):
+#         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+#             if not ignore_status:
+#                 print(name, 'no ignore status')
+#         with zero.GatheredParameters([param]):
+#             param = param.data.detach().cpu().clone()
+#     else:
+#         param = param.detach().cpu().clone()
+#     return param
+def maybe_zero_3(param, ignore_status: bool = False, name: str = None):
+    """
+    Safely gather a (possibly ZeRO-3 partitioned) parameter to CPU.
+    - If DeepSpeed is available and this param is managed by ZeRO, use GatheredParameters.
+    - Otherwise just detach+cpu clone.
+    """
+    # Try import deepspeed only if available
+    try:
+        from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+        from deepspeed import zero
+        has_ds = True
+    except Exception:
+        has_ds = False
+        ZeroParamStatus = None
+        zero = None
+
+    # Not using ZeRO (or deepspeed not installed): simple fallback
+    if (not has_ds) or (not hasattr(param, "ds_id")):
+        return param.detach().cpu().clone()
+
+    # Using ZeRO-managed parameter
+    if getattr(param, "ds_status", None) == getattr(ZeroParamStatus, "NOT_AVAILABLE", None):
+        if not ignore_status and name is not None:
+            # 这里保持原有行为（可改成 logging.warning）
+            print(f"{name}: param.ds_status != ZeroParamStatus.AVAILABLE")
+
+    # Gather full param shard to CPU
+    with zero.GatheredParameters([param]):
+        return param.data.detach().cpu().clone()
 
 
 def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):

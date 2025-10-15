@@ -39,7 +39,8 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         line = self.questions[index]
         image_file = line["image"]
-        qs = line["text"]
+        # qs = line["text"]
+        qs = line["conversations"][0]["value"]
         if self.model_config.mm_use_im_start_end:
             qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
         else:
@@ -96,8 +97,10 @@ def eval_model(args):
     data_loader = create_data_loader(questions, args.image_folder, tokenizer, image_processor, model.config)
 
     for (input_ids, image_tensor, image_sizes), line in tqdm(zip(data_loader, questions), total=len(questions)):
-        idx = line["question_id"]
-        cur_prompt = line["text"]
+        # idx = line["question_id"]
+        idx = line['id']
+        # cur_prompt = line["text"]
+        cur_prompt = line['conversations'][0]['value']
 
         input_ids = input_ids.to(device='cuda', non_blocking=True)
 
