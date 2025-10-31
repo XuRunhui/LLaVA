@@ -16,6 +16,7 @@ DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/train.json"
 IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/VQA_RAD_Image_Folder"
 OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/no_lora"
 
+
 # Vision tower (must match the pretrained model)
 # VISION_TOWER="openai/clip-vit-large-patch14"
 VISION_TOWER="openai/clip-vit-large-patch14-336"

@@ -14,7 +14,7 @@ fi
 NUM_EPOCHS=$1
 # Path to your LoRA checkpoint directory
 # This should contain: adapter_config.json, adapter_model.bin, non_lora_trainables.bin
-LORA_MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/lora"
+LORA_MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/lora_64"
 
 # Base model (LLaVA-Med v1.5)
 BASE_MODEL="microsoft/llava-med-v1.5-mistral-7b"
@@ -24,7 +24,7 @@ TEST_DATA="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/test.jsonl"
 IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/VQA_RAD_Image_Folder"
 
 # Output path for predictions
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/lora/eval"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/lora_64/eval"
 mkdir -p $OUTPUT_DIR
 ANSWERS_FILE="$OUTPUT_DIR/vqa_rad_test_predictions_$NUM_EPOCHS.jsonl"
 

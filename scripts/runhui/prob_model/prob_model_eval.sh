@@ -6,22 +6,31 @@
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+if [ $# -lt 1 ]; then
+    echo "Usage: bash $0 <EPOCH_NUMBER>"
+    exit 1
+fi
 
+NUM_EPOCHS=$1
 # Path to your LoRA checkpoint directory
 # This should contain: adapter_config.json, adapter_model.bin, non_lora_trainables.bin
-LORA_MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-PathVQA-finetune/lora_64"
+LORA_MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/prob_model"
 
 # Base model (LLaVA-Med v1.5)
 BASE_MODEL="microsoft/llava-med-v1.5-mistral-7b"
 
 # VQA-RAD test data paths
-TEST_DATA="/project2/ruishanl_1185/SDP_for_VLM/datasets/PathVQA/annotations/llava_test.jsonl"
-IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/PathVQA/images"
+TEST_DATA="/project2/ruishanl_1185/SDP_for_VLM/datasets/CheXpert_Synthesized_VQA/prob_model_data/llava_test.json"
+IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/CheXpert_Synthesized_VQA/synthesized"
 
 # Output path for predictions
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-PathVQA-finetune/lora_64/eval"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/prob_model/eval"
 mkdir -p $OUTPUT_DIR
-ANSWERS_FILE="$OUTPUT_DIR/path_vqa_llava_predictions.jsonl"
+ANSWERS_FILE="$OUTPUT_DIR/prob_model_predictions_$NUM_EPOCHS.jsonl"
+
+Checkpoint_DIR="$OUTPUT_DIR/epoch_$NUM_EPOCHS"
+mkdir -p $Checkpoint_DIR
+find /project2/ruishanl_1185/SDP_for_VLM/outputs/prob_model -maxdepth 1 -type f -exec cp {} $Checkpoint_DIR \;
 
 # Evaluation parameters
 CONV_MODE="mistral_instruct"  # Conversation template for Mistral

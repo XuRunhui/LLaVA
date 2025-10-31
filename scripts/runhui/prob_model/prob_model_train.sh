@@ -15,9 +15,9 @@ if [ $# -lt 1 ]; then
 fi
 # Model and data paths
 MODEL_NAME="microsoft/llava-med-v1.5-mistral-7b"
-DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/train.json"
-IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/vqa_rad/VQA_RAD_Image_Folder"
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava-med-v1.5-vqarad-finetune/lora_64"
+DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/CheXpert_Synthesized_VQA/prob_model_data/llava_train.json"
+IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/CheXpert_Synthesized_VQA/synthesized"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/prob_model"
 
 # Vision tower (must match the pretrained model)
 VISION_TOWER="openai/clip-vit-large-patch14-336"
