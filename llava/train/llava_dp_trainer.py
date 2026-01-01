@@ -26,9 +26,18 @@ try:
     from opacus.utils.batch_memory_manager import BatchMemoryManager
     from opacus.validators import ModuleValidator
     from opacus.distributed import DifferentiallyPrivateDistributedDataParallel as DPDDP
+
+    # Try to import GradSampleModule for fast gradient clipping
+    try:
+        from opacus.grad_sample import GradSampleModule
+        FAST_GRADIENT_CLIPPING_AVAILABLE = True
+    except ImportError:
+        FAST_GRADIENT_CLIPPING_AVAILABLE = False
+
     OPACUS_AVAILABLE = True
 except ImportError:
     OPACUS_AVAILABLE = False
+    FAST_GRADIENT_CLIPPING_AVAILABLE = False
     logger.warning(
         "Opacus not found. Please install it to use differential privacy: "
         "`pip install opacus`"
@@ -95,6 +104,35 @@ class LLaVADPTrainer(LLaVATrainer):
             # Physical batch size for memory management
             self.physical_batch_size = getattr(self.args, 'dp_physical_batch_size', None)
 
+            # Fast gradient clipping for memory efficiency
+            self.use_fast_gradient_clipping = getattr(self.args, 'dp_fast_gradient_clipping', True)
+
+            # CRITICAL: Disable gradient checkpointing for DP
+            # Opacus GradSampleModule wrapper doesn't support gradient_checkpointing_enable()
+            if self.args.gradient_checkpointing:
+                logger.warning("=" * 80)
+                logger.warning("DISABLING GRADIENT CHECKPOINTING FOR DP TRAINING")
+                logger.warning("Opacus GradSampleModule is incompatible with gradient checkpointing.")
+                logger.warning("This will increase memory usage but is necessary for DP.")
+                logger.warning("=" * 80)
+                self.args.gradient_checkpointing = False
+
+            # CRITICAL: Opacus 1.4.1 doesn't support mixed precision (bf16/fp16)
+            # It adds noise in float32, causing dtype mismatch
+            # We MUST use float32 for the entire model
+            if self.args.bf16 or self.args.fp16:
+                logger.warning("=" * 80)
+                logger.warning("MIXED PRECISION DETECTED - SWITCHING TO FLOAT32 FOR DP")
+                logger.warning("Opacus 1.4.1 does not support bf16/fp16 properly.")
+                logger.warning("Model will be converted to float32 when Privacy Engine is attached.")
+                logger.warning("This will use more memory but is necessary for Opacus 1.4.1.")
+                logger.warning("=" * 80)
+                self._needs_dtype_conversion = True
+                self._target_dtype = torch.float32
+            else:
+                self._needs_dtype_conversion = False
+                self._target_dtype = torch.float32
+
             logger.info("=" * 80)
             logger.info("Differential Privacy Training Enabled")
             logger.info(f"  Target ε (epsilon): {self.target_epsilon}")
@@ -112,8 +150,13 @@ class LLaVADPTrainer(LLaVATrainer):
         1. Validating and fixing model architecture for DP compatibility
         2. Handling vision tower and multimodal components
         3. Replacing incompatible layers
+        4. Ensuring dtype consistency
         """
         logger.info("Preparing model for differential privacy...")
+
+        # Store target dtype for restoration after fixes
+        # For DP with Opacus 1.4.1, we always use float32
+        original_dtype = torch.float32
 
         # For VLM, we typically want to apply DP only to the language model part
         # and optionally to the projection layer, not the frozen vision encoder
@@ -129,6 +172,21 @@ class LLaVADPTrainer(LLaVATrainer):
             # Try to fix the model automatically
             logger.info("Attempting to fix model for DP compatibility...")
             model = ModuleValidator.fix(model)
+
+            # CRITICAL: ModuleValidator.fix() may change dtypes - restore them
+            if original_dtype is not None:
+                logger.info(f"Restoring model dtype to {original_dtype}...")
+
+                # Convert model parameters to original dtype
+                for name, param in model.named_parameters():
+                    if param.dtype != original_dtype:
+                        param.data = param.data.to(original_dtype)
+
+                # Also convert buffers (like running_mean, running_var in normalization layers)
+                for name, buffer in model.named_buffers():
+                    if buffer.dtype not in [torch.long, torch.int, torch.bool]:
+                        if buffer.dtype != original_dtype:
+                            buffer.data = buffer.data.to(original_dtype)
 
             # Re-validate
             errors = ModuleValidator.validate(model, strict=False)
@@ -153,6 +211,20 @@ class LLaVADPTrainer(LLaVATrainer):
 
         logger.info("Initializing Privacy Engine...")
 
+        # CRITICAL: Convert model to float32 if using mixed precision
+        if hasattr(self, '_needs_dtype_conversion') and self._needs_dtype_conversion:
+            target_dtype = getattr(self, '_target_dtype', torch.float32)
+            logger.info(f"Converting model to {target_dtype} for Opacus compatibility...")
+
+            # Convert all model parameters and buffers
+            self.model = self.model.to(dtype=target_dtype)
+
+            # Update flags
+            self.args.bf16 = False
+            self.args.fp16 = False
+
+            logger.info(f"Model successfully converted to {target_dtype}")
+
         # Prepare model for DP
         self.model = self._prepare_model_for_dp(self.model)
 
@@ -164,24 +236,78 @@ class LLaVADPTrainer(LLaVATrainer):
 
         # Attach privacy engine
         try:
-            self.model, self.optimizer, train_dataloader = self.privacy_engine.make_private_with_epsilon(
-                module=self.model,
-                optimizer=self.optimizer,
-                data_loader=self.get_train_dataloader(),
-                target_epsilon=self.target_epsilon,
-                target_delta=self.target_delta,
-                epochs=int(self.args.num_train_epochs),
-                max_grad_norm=self.max_grad_norm,
-                poisson_sampling=self.poisson_sampling,
-            )
+            # Check if fast gradient clipping is supported in this Opacus version
+            import inspect
+            make_private_sig = inspect.signature(self.privacy_engine.make_private_with_epsilon)
+
+            if 'grad_sample_mode' in make_private_sig.parameters and self.use_fast_gradient_clipping:
+                logger.info("=" * 80)
+                logger.info("FAST GRADIENT CLIPPING ENABLED (Ghost Clipping)")
+                logger.info("Memory usage will be reduced by ~4-8x compared to standard DP!")
+                logger.info("=" * 80)
+                grad_sample_mode = "ghost"  # Memory-efficient mode
+
+                self.model, self.optimizer, train_dataloader = self.privacy_engine.make_private_with_epsilon(
+                    module=self.model,
+                    optimizer=self.optimizer,
+                    data_loader=self.get_train_dataloader(),
+                    target_epsilon=self.target_epsilon,
+                    target_delta=self.target_delta,
+                    epochs=int(self.args.num_train_epochs),
+                    max_grad_norm=self.max_grad_norm,
+                    poisson_sampling=self.poisson_sampling,
+                    grad_sample_mode=grad_sample_mode,
+                )
+            else:
+                if self.use_fast_gradient_clipping:
+                    logger.warning("=" * 80)
+                    logger.warning("Fast gradient clipping NOT AVAILABLE in this Opacus version")
+                    logger.warning("Using standard per-sample gradients (HIGH memory usage)")
+                    logger.warning("Consider upgrading: pip install opacus>=1.5.0")
+                    logger.warning("=" * 80)
+
+                self.model, self.optimizer, train_dataloader = self.privacy_engine.make_private_with_epsilon(
+                    module=self.model,
+                    optimizer=self.optimizer,
+                    data_loader=self.get_train_dataloader(),
+                    target_epsilon=self.target_epsilon,
+                    target_delta=self.target_delta,
+                    epochs=int(self.args.num_train_epochs),
+                    max_grad_norm=self.max_grad_norm,
+                    poisson_sampling=self.poisson_sampling,
+                )
 
             # Store the computed noise multiplier
-            computed_noise = self.privacy_engine.noise_multiplier
+            # API changed between Opacus versions - handle both
+            if hasattr(self.privacy_engine, 'noise_multiplier'):
+                computed_noise = self.privacy_engine.noise_multiplier
+            elif hasattr(self.optimizer, 'noise_multiplier'):
+                computed_noise = self.optimizer.noise_multiplier
+            else:
+                # Fallback: estimate from accountant
+                computed_noise = "N/A (check accountant)"
 
             logger.info("Privacy Engine successfully attached!")
-            logger.info(f"  Computed noise multiplier: {computed_noise:.4f}")
+            logger.info(f"  Computed noise multiplier: {computed_noise}")
             logger.info(f"  Total training steps: {total_steps}")
             logger.info(f"  Training will satisfy (ε={self.target_epsilon}, δ={self.target_delta})-DP")
+
+            # CRITICAL: Ensure vision tower outputs correct dtype
+            # The vision encoder is typically frozen, but we need to ensure its outputs match model dtype
+            if hasattr(self.model, '_module'):  # GradSampleModule wrapper
+                base_model = self.model._module
+            else:
+                base_model = self.model
+
+            # Access vision tower through the model hierarchy
+            if hasattr(base_model, 'model') and hasattr(base_model.model, 'vision_tower'):
+                vision_tower = base_model.model.vision_tower
+                # For Opacus 1.4.1, we must use float32
+                target_dtype = torch.float32
+
+                if vision_tower is not None:
+                    logger.info(f"Setting vision tower dtype to {target_dtype}")
+                    vision_tower.to(dtype=target_dtype)
 
         except Exception as e:
             logger.error(f"Failed to attach Privacy Engine: {e}")
@@ -222,35 +348,39 @@ class LLaVADPTrainer(LLaVATrainer):
         """
         Perform a training step with DP support.
         """
-        # Use physical batch size management if specified
+        # NOTE: Physical batch size management (BatchMemoryManager) is not compatible
+        # with Opacus 1.4.1. If you get OOM errors, reduce per_device_train_batch_size instead.
         if self.dp_enabled and self.physical_batch_size is not None:
-            # This helps with memory management for large logical batch sizes
-            return self._training_step_with_batch_memory_manager(model, inputs)
-        else:
-            # Standard training step
-            return super().training_step(model, inputs)
+            logger.warning_once(
+                "dp_physical_batch_size is set but not supported in Opacus 1.4.1. "
+                "If you encounter OOM, reduce per_device_train_batch_size instead."
+            )
+
+        # CRITICAL: Ensure input tensors match model dtype
+        # For DP with Opacus 1.4.1, we must use float32
+        if self.dp_enabled and 'images' in inputs:
+            target_dtype = torch.float32
+            if inputs['images'].dtype != target_dtype:
+                inputs['images'] = inputs['images'].to(target_dtype)
+
+        # Use standard training step
+        return super().training_step(model, inputs)
 
     def _training_step_with_batch_memory_manager(self, model, inputs):
         """
         Training step with batch memory manager for efficient DP training.
+
+        NOTE: This is not compatible with Opacus 1.4.1's BatchMemoryManager API.
+        For now, we'll just use standard training without batch splitting.
+        Physical batch size management is only fully supported in newer Opacus versions.
         """
-        model.train()
-        inputs = self._prepare_inputs(inputs)
-
-        with BatchMemoryManager(
-            data_loader=[inputs],
-            max_physical_batch_size=self.physical_batch_size,
-            optimizer=self.optimizer
-        ) as batch_manager:
-            for batch in batch_manager:
-                loss = self.compute_loss(model, batch)
-
-                if self.args.gradient_accumulation_steps > 1:
-                    loss = loss / self.args.gradient_accumulation_steps
-
-                loss.backward()
-
-        return loss.detach()
+        # For Opacus 1.4.1, BatchMemoryManager doesn't work well with pre-batched inputs
+        # Fall back to standard training step
+        logger.warning(
+            "Physical batch size splitting not supported in Opacus 1.4.1. "
+            "Using standard batch processing. Consider reducing per_device_train_batch_size if OOM."
+        )
+        return super().training_step(model, inputs)
 
     def log(self, logs: Dict[str, float]) -> None:
         """
@@ -296,12 +426,21 @@ class LLaVADPTrainer(LLaVATrainer):
 
                 if self.args.local_rank in [0, -1]:
                     os.makedirs(output_dir, exist_ok=True)
+
+                    # Get noise multiplier - API varies by Opacus version
+                    if hasattr(self.privacy_engine, 'noise_multiplier'):
+                        noise_mult = float(self.privacy_engine.noise_multiplier)
+                    elif hasattr(self.optimizer, 'noise_multiplier'):
+                        noise_mult = float(self.optimizer.noise_multiplier)
+                    else:
+                        noise_mult = None
+
                     privacy_info = {
                         'epsilon': float(epsilon),
                         'delta': float(self.target_delta),
                         'target_epsilon': float(self.target_epsilon),
                         'max_grad_norm': float(self.max_grad_norm),
-                        'noise_multiplier': float(self.privacy_engine.noise_multiplier),
+                        'noise_multiplier': noise_mult,
                         'global_step': self.state.global_step,
                         'epoch': self.state.epoch,
                     }

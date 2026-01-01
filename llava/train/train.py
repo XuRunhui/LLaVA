@@ -683,6 +683,22 @@ class LazySupervisedDataset(Dataset):
         super(LazySupervisedDataset, self).__init__()
         list_data_dict = json.load(open(data_path, "r"))
 
+        # Filter data: only keep samples with view='PA' or view='AP'
+        original_count = len(list_data_dict)
+
+        # Debug: count all view types (comment out after first run)
+        from collections import Counter
+        view_counts = Counter(sample.get('view', 'MISSING') for sample in list_data_dict)
+        rank0_print(f"View distribution in dataset: {dict(view_counts)}")
+
+        list_data_dict = [
+            sample for sample in list_data_dict
+            if sample.get('view', '').upper() in ['PA', 'AP']
+        ]
+        filtered_count = len(list_data_dict)
+        rank0_print(f"Filtered dataset: kept {filtered_count}/{original_count} samples with view='PA' or 'AP'")
+        rank0_print(f"Skipped {original_count - filtered_count} samples with other views")
+
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
         self.list_data_dict = list_data_dict
@@ -713,6 +729,20 @@ class LazySupervisedDataset(Dataset):
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+
+        # Inject 'reason' attribute into conversations if it exists
+        if 'reason' in self.list_data_dict[i]:
+            reason = self.list_data_dict[i]['reason']
+            sources = copy.deepcopy(sources)
+            for source in sources:
+                conversations = source.get('conversations', [])
+                if conversations and conversations[0]['from'] == 'human':
+                    # Add reason to the first human message
+                    # Customize the format as needed
+                    original_value = conversations[0]['value']
+                    conversations[0]['value'] = f"{original_value} With the indication: {reason}"
+                    logging.info(f"Injected reason into conversation: {conversations[0]['value']}")
+
         if 'image' in sources[0]:
             image_file = self.list_data_dict[i]['image']
             image_folder = self.data_args.image_folder

@@ -1,12 +1,46 @@
 #!/bin/bash
+#SBATCH --job-name=llava_llavarad
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:a100:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=03:00:00
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
 
-deepspeed llava/train/train_mem.py \
+set -euo pipefail
+
+# module purge
+# module load gcc/13.3.0
+# module load cuda/12.6.3
+# export CUDA_HOME=/apps/spack/2406/apps/linux-rocky8-x86_64_v3/gcc-13.3.0/cuda-12.6.3-4yhbknw
+
+# mkdir -p logs
+
+# # Conda (batch-safe) activation
+# source /home1/runhuixu/miniconda3/etc/profile.d/conda.sh
+# conda activate llava
+
+cd /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA
+
+MODEL_NAME="liuhaotian/llava-v1.5-7b"
+DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_train_p10_filtered.json"
+IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/mimic-cxr-jpg/mimic-cxr-jpg/2.1.0/files"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128"
+# Number of GPUs (adjust based on your setup)
+NUM_GPUS=1
+MASTER_PORT=29500
+# deepspeed 
+    # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
+torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
+    /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/train/train.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
-    --deepspeed ./scripts/zero3.json \
-    --model_name_or_path liuhaotian/llava-v1.5-13b \
+    --model_name_or_path $MODEL_NAME\
     --version v1 \
-    --data_path ./playground/data/llava_v1_5_mix665k.json \
-    --image_folder ./playground/data \
+    --data_path $DATA_PATH \
+    --image_folder $IMAGE_FOLDER\
     --vision_tower openai/clip-vit-large-patch14-336 \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
@@ -15,14 +49,14 @@ deepspeed llava/train/train_mem.py \
     --image_aspect_ratio pad \
     --group_by_modality_length True \
     --bf16 True \
-    --output_dir ./checkpoints/llava-v1.5-13b-task-lora \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 16 \
+    --output_dir $OUTPUT_DIR \
+    --num_train_epochs 3 \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 50000 \
+    --save_steps 200 \
     --save_total_limit 1 \
     --learning_rate 2e-4 \
     --weight_decay 0. \
@@ -31,7 +65,6 @@ deepspeed llava/train/train_mem.py \
     --logging_steps 1 \
     --tf32 True \
     --model_max_length 2048 \
-    --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --report_to wandb

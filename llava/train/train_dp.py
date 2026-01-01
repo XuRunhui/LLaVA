@@ -151,6 +151,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=None,
         metadata={"help": "Physical batch size for memory-efficient DP training. If None, uses per_device_train_batch_size."}
     )
+    dp_fast_gradient_clipping: bool = field(
+        default=True,
+        metadata={"help": "Use fast gradient clipping (ghost clipping) to reduce memory. Highly recommended for large models."}
+    )
 
 
 def maybe_zero_3(param, ignore_status: bool = False, name: str = None):
