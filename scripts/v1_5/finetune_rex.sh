@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=llava_llavarad_dp
+#SBATCH --job-name=llava_llavarad
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:a40:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -20,15 +20,15 @@ set -euo pipefail
 # mkdir -p logs
 
 # # Conda (batch-safe) activation
-source /home1/runhuixu/miniconda3/etc/profile.d/conda.sh
-conda activate llava
+# source /home1/runhuixu/miniconda3/etc/profile.d/conda.sh
+# conda activate llava
 
 
 
 MODEL_NAME="liuhaotian/llava-v1.5-7b"
-DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_train_p10_filtered.json"
-IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/mimic-cxr-jpg/mimic-cxr-jpg/2.1.0/files/"
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8"
+DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/ReXGradient/metadata/rexgradient_train.json"
+IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/deid_png"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_rex/lora_128_dp_e8_lr2e4"
 # Number of GPUs (adjust based on your setup)
 NUM_GPUS=1
 MASTER_PORT=29500
@@ -39,7 +39,7 @@ MASTER_PORT=29500
 # IMPORTANT: DP training protects patient privacy in medical data
 # Set DP_ENABLED=False to train without differential privacy
 
-DP_ENABLED=False # Set to False to disable DP
+DP_ENABLED=True              # Set to False to disable DP
 DP_EPSILON=8.0               # Privacy budget (lower = more private, e.g., 1.0-10.0)
 DP_DELTA=2e-5                # Privacy parameter (typically 1/dataset_size)
 DP_MAX_GRAD_NORM=2.0         # Gradient clipping threshold (adjust based on convergence)
@@ -78,7 +78,7 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --save_strategy "steps" \
     --save_steps 100 \
     --save_total_limit 1 \
-    --learning_rate 5e-5 \
+    --learning_rate 2e-4 \
     --weight_decay 0. \
     --warmup_ratio 0.05 \
     --lr_scheduler_type "cosine" \

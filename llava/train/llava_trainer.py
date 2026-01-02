@@ -433,6 +433,38 @@ class LLaVATrainer(Trainer):
             super(LLaVATrainer, self)._save_checkpoint(model, trial, metrics)
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # CRITICAL FIX: For DP training with LoRA, unwrap Opacus before PEFT saves
+        # The issue is that Opacus wraps the model in a GradSampleModule, and when
+        # HuggingFace/PEFT tries to save, it sees the wrapped model instead of the
+        # PeftModel, so it saves the entire 15GB base model instead of just LoRA adapters
+        if getattr(self.args, 'dp_enabled', False) and getattr(self.args, 'lora_enable', False):
+            print("=" * 60)
+            print("DP + LoRA SAVE: Unwrapping Opacus to expose PeftModel")
+            print("=" * 60)
+
+            # Temporarily unwrap the Opacus wrapper
+            unwrapped_model = self.model
+            if hasattr(unwrapped_model, '_module'):
+                unwrapped_model = unwrapped_model._module
+                print(f"Unwrapped model type: {type(unwrapped_model).__name__}")
+
+            # Temporarily replace self.model with unwrapped version for saving
+            original_model = self.model
+            self.model = unwrapped_model
+
+            try:
+                # Now call parent _save with the unwrapped PeftModel
+                # This should trigger PEFT's save_pretrained which only saves adapters
+                super(LLaVATrainer, self)._save(output_dir, state_dict)
+                print("Successfully saved LoRA adapters only")
+            finally:
+                # Restore the wrapped model for continued training
+                self.model = original_model
+                print("Restored Opacus-wrapped model for training")
+
+            print("=" * 60)
+            return
+
         if getattr(self.args, 'tune_mm_mlp_adapter', False):
             pass
         else:
