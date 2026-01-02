@@ -291,16 +291,42 @@ class LLaVATrainer(Trainer):
             self.privacy_engine = privacy_engine
             self._train_dataloader = train_dataloader
 
-            # Fix dtype inconsistencies after Opacus wrapping
-            # Opacus can sometimes change dtypes, so we need to ensure consistency
+            # CRITICAL FIX: Re-apply dtype to vision_tower after Opacus wrapping
+            # Root cause: Opacus resets vision_tower dtype, breaking clip_encoder.py:54-55
+            # The vision tower uses self.dtype to process images, then returns .to(images.dtype)
+            # If self.dtype is wrong (fp32 instead of bf16), the output dtype will be wrong
             target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)
-            logger.info(f"Ensuring dtype consistency after DP wrapping (target: {target_dtype})...")
+            logger.info(f"Re-applying dtype {target_dtype} after DP wrapping to fix vision_tower...")
 
-            # Convert entire model to target dtype and device
-            # This is simpler and more reliable than selective conversion
-            self.model.to(device=self.args.device, dtype=target_dtype)
+            # Unwrap model layers to access vision_tower directly
+            # Structure: GradSampleModule(_module) -> PeftModel(base_model/model) -> LlavaLlamaForCausalLM(model) -> LlavaLlamaModel(vision_tower)
+            inner_model = self.model
 
-            logger.info(f"Dtype consistency check completed - model on {self.args.device} with dtype {target_dtype}")
+            # Unwrap Opacus GradSampleModule
+            if hasattr(inner_model, '_module'):
+                inner_model = inner_model._module
+                logger.info("Unwrapped Opacus GradSampleModule")
+
+            # Unwrap PEFT model
+            if hasattr(inner_model, 'base_model'):
+                inner_model = inner_model.base_model
+                logger.info("Unwrapped PEFT model")
+            elif hasattr(inner_model, 'model') and hasattr(inner_model.model, 'vision_tower'):
+                inner_model = inner_model.model
+                logger.info("Accessed inner LlavaLlamaModel")
+
+            # Now fix vision_tower dtype
+            if hasattr(inner_model, 'vision_tower') and inner_model.vision_tower is not None:
+                logger.info(f"Found vision_tower, converting to {target_dtype}...")
+                inner_model.vision_tower.to(device=self.args.device, dtype=target_dtype)
+                logger.info(f"Vision tower dtype is now: {inner_model.vision_tower.dtype}")
+
+            # Also fix mm_projector dtype
+            if hasattr(inner_model, 'mm_projector'):
+                logger.info(f"Converting mm_projector to {target_dtype}...")
+                inner_model.mm_projector.to(device=self.args.device, dtype=target_dtype)
+
+            logger.info(f"Dtype consistency fix completed for multimodal components")
 
             logger.info(f"PrivacyEngine attached successfully")
             logger.info(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
