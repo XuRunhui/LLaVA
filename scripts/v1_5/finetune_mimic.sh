@@ -28,7 +28,7 @@ set -euo pipefail
 MODEL_NAME="liuhaotian/llava-v1.5-7b"
 DATA_PATH="/root/autodl-tmp/mimic_cxr_jpg/chat_train_p10_filtered.json"
 IMAGE_FOLDER="/root/autodl-tmp/mimic_cxr_jpg/mimic-cxr-jpg/2.1.0/files/p10"
-OUTPUT_DIR="/root/autodl-tmp/mimic_cxr_jpg/output/llava_llavarad/lora_128"
+OUTPUT_DIR="/root/autodl-tmp/mimic_cxr_jpg/output/llava_llavarad/lora_128_dp"
 # Number of GPUs (adjust based on your setup)
 NUM_GPUS=1
 MASTER_PORT=29500
