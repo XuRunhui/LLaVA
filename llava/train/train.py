@@ -113,17 +113,26 @@ class TrainingArguments(transformers.TrainingArguments):
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
+    try:
+        from deepspeed import zero
+        from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+        has_ds = True
+    except ImportError:
+        has_ds = False
+
+    # If DeepSpeed is not available or param is not ZeRO-managed
+    if not has_ds or not hasattr(param, "ds_id"):
+        return param.detach().cpu().clone()
+
+    # DeepSpeed ZeRO-3 path
+    if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+        if not ignore_status:
+            logging.warning(
+                f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}"
+            )
+
+    with zero.GatheredParameters([param]):
+        return param.data.detach().cpu().clone()
 
 
 # Borrowed from peft.utils.get_peft_model_state_dict
@@ -979,9 +988,26 @@ def train(attn_implementation=None):
             model.named_parameters()
         )
         if training_args.local_rank == 0 or training_args.local_rank == -1:
+
+            # ---- FIX generation config ----
+            from transformers import GenerationConfig
+
+            gen_kwargs = {}
+            if hasattr(model.config, "max_length"):
+                gen_kwargs["max_length"] = model.config.max_length
+                delattr(model.config, "max_length")
+
+            if gen_kwargs:
+                model.generation_config = GenerationConfig(**gen_kwargs)
+                model.generation_config.save_pretrained(training_args.output_dir)
+            # --------------------------------
+
             model.config.save_pretrained(training_args.output_dir)
+            # print("Saving LoRA model...")
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
+            # print("Saving non-LoRA trainable parameters...")
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
+            # print("Saved.")
     else:
         safe_save_model_for_hf_trainer(trainer=trainer,
                                        output_dir=training_args.output_dir)
