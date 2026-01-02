@@ -74,6 +74,11 @@ class DataArguments:
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'square'
+    # MIMIC-CXR specific arguments
+    use_mimic_loader: bool = field(default=False, metadata={"help": "Use MIMIC-CXR data loader with filtering"})
+    mimic_filter_views: bool = field(default=True, metadata={"help": "Filter to only PA/AP views in MIMIC-CXR"})
+    mimic_include_reason: bool = field(default=True, metadata={"help": "Include reason/indication in MIMIC-CXR prompts"})
+    mimic_generation_methods: str = field(default="all", metadata={"help": "Which generation methods to include: 'gpt4', 'rule-based', or 'all'"})
 
 
 @dataclass
@@ -671,6 +676,163 @@ def preprocess(
     return dict(input_ids=input_ids, labels=targets)
 
 
+def load_mimic_cxr_data(data_path: str, data_args: DataArguments) -> List[Dict]:
+    """
+    Load and filter MIMIC-CXR dataset.
+
+    Args:
+        data_path: Path to the MIMIC-CXR JSON file
+        data_args: DataArguments containing filtering options
+
+    Returns:
+        Filtered list of data samples
+    """
+    logging.info("=" * 80)
+    logging.info("MIMIC-CXR Data Loader - Starting data loading and filtering")
+    logging.info("=" * 80)
+
+    with open(data_path, 'r') as f:
+        dataset = json.load(f)
+
+    original_count = len(dataset)
+    logging.info(f"Total samples in dataset: {original_count}")
+
+    # Counters for filtering statistics
+    filtered_by_generation_method = 0
+    filtered_by_invalid_findings = 0
+    filtered_by_view = 0
+    samples_with_reason = 0
+    samples_without_reason = 0
+
+    # Track view type distribution
+    view_counts = {}
+    generation_method_counts = {}
+
+    ret = []
+
+    for d in dataset:
+        # Track generation method distribution
+        generate_method = d.get('generate_method', 'unknown')
+        generation_method_counts[generate_method] = generation_method_counts.get(generate_method, 0) + 1
+
+        # Track view distribution
+        view = d.get('view', 'unknown')
+        view_counts[view] = view_counts.get(view, 0) + 1
+
+        # Filter by generation method if specified
+        if data_args.mimic_generation_methods == 'gpt4':
+            if generate_method != 'gpt4':
+                filtered_by_generation_method += 1
+                continue
+        elif data_args.mimic_generation_methods == 'rule-based':
+            if generate_method != 'rule-based':
+                filtered_by_generation_method += 1
+                continue
+        # 'all' means no filtering by generation method
+
+        # Skip samples with invalid findings (empty or non-string)
+        if not d.get('conversations') or len(d['conversations']) < 2:
+            filtered_by_invalid_findings += 1
+            continue
+        if not isinstance(d["conversations"][1].get("value"), str):
+            filtered_by_invalid_findings += 1
+            continue
+        if not d["conversations"][1]["value"].strip():
+            filtered_by_invalid_findings += 1
+            continue
+
+        # Filter by view (only PA or AP) if enabled
+        if data_args.mimic_filter_views:
+            if view not in ('AP', 'PA'):
+                filtered_by_view += 1
+                continue
+
+        # Clean up image path (remove 'mimic/' prefix if present)
+        if d.get('image', '').startswith("mimic/"):
+            d['image'] = d['image'][len('mimic/'):]
+
+        # Modify prompt to include reason/indication if enabled and available
+        if data_args.mimic_include_reason and d.get('reason') is not None:
+            reason = d['reason'].replace('\n', ' ').strip()
+            if reason:
+                d['conversations'][0]['value'] = (
+                    f"<image>\n"
+                    f"Provide a description of the findings in the radiology image "
+                    f"given the following indication: {reason}"
+                )
+                samples_with_reason += 1
+            else:
+                # Reason field exists but is empty
+                d['conversations'][0]['value'] = (
+                    "<image>\n"
+                    "Provide a description of the findings in the radiology image."
+                )
+                samples_without_reason += 1
+        else:
+            # No reason available or not using reasons
+            d['conversations'][0]['value'] = (
+                "<image>\n"
+                "Provide a description of the findings in the radiology image."
+            )
+            samples_without_reason += 1
+
+        ret.append(d)
+
+    # Print detailed statistics
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("MIMIC-CXR Data Filtering Summary")
+    logging.info("=" * 80)
+    logging.info(f"Total samples loaded:           {original_count:,}")
+    logging.info(f"Samples after filtering:        {len(ret):,}")
+    logging.info(f"Samples filtered out:           {original_count - len(ret):,} ({100 * (original_count - len(ret)) / original_count:.1f}%)")
+    logging.info("")
+
+    logging.info("-" * 80)
+    logging.info("Filtering Breakdown:")
+    logging.info("-" * 80)
+    logging.info(f"  Filtered by generation method:  {filtered_by_generation_method:,}")
+    logging.info(f"  Filtered by invalid findings:   {filtered_by_invalid_findings:,}")
+    logging.info(f"  Filtered by view type:          {filtered_by_view:,}")
+    logging.info("")
+
+    logging.info("-" * 80)
+    logging.info("Generation Method Distribution (in original dataset):")
+    logging.info("-" * 80)
+    for method, count in sorted(generation_method_counts.items(), key=lambda x: x[1], reverse=True):
+        logging.info(f"  {method:20s}: {count:,} ({100 * count / original_count:.1f}%)")
+    logging.info(f"  Selected method: {data_args.mimic_generation_methods}")
+    logging.info("")
+
+    logging.info("-" * 80)
+    logging.info("View Type Distribution (in original dataset):")
+    logging.info("-" * 80)
+    for view_type, count in sorted(view_counts.items(), key=lambda x: x[1], reverse=True):
+        logging.info(f"  {view_type:20s}: {count:,} ({100 * count / original_count:.1f}%)")
+    if data_args.mimic_filter_views:
+        logging.info(f"  Filtered to: PA/AP views only")
+    else:
+        logging.info(f"  No view filtering applied")
+    logging.info("")
+
+    logging.info("-" * 80)
+    logging.info("Clinical Indication/Reason:")
+    logging.info("-" * 80)
+    if data_args.mimic_include_reason:
+        logging.info(f"  Samples with reason included:   {samples_with_reason:,}")
+        logging.info(f"  Samples without reason:         {samples_without_reason:,}")
+        logging.info(f"  Reason inclusion: ENABLED")
+    else:
+        logging.info(f"  Reason inclusion: DISABLED")
+    logging.info("")
+
+    logging.info("=" * 80)
+    logging.info(f"Final dataset size: {len(ret):,} samples")
+    logging.info("=" * 80)
+
+    return ret
+
+
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
@@ -678,7 +840,12 @@ class LazySupervisedDataset(Dataset):
                  tokenizer: transformers.PreTrainedTokenizer,
                  data_args: DataArguments):
         super(LazySupervisedDataset, self).__init__()
-        list_data_dict = json.load(open(data_path, "r"))
+
+        # Use MIMIC-CXR loader if enabled, otherwise use default loader
+        if data_args.use_mimic_loader:
+            list_data_dict = load_mimic_cxr_data(data_path, data_args)
+        else:
+            list_data_dict = json.load(open(data_path, "r"))
 
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer

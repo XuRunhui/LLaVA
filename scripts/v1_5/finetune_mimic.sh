@@ -52,7 +52,16 @@ DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recomme
 
 # NOTE: The trainer automatically converts trainable parameters to FP32 for DP
 # Non-trainable parts (vision tower, frozen base) remain in BF16 for efficiency
-# deepspeed 
+
+# ====================================
+# MIMIC-CXR Data Filtering Options
+# ====================================
+USE_MIMIC_LOADER=True            # Enable MIMIC-CXR specific data loader
+MIMIC_FILTER_VIEWS=True          # Filter to only PA/AP views (recommended)
+MIMIC_INCLUDE_REASON=True        # Include clinical indication/reason in prompts
+MIMIC_GENERATION_METHODS="all"   # Options: "all", "gpt4", or "rule-based"
+
+# deepspeed
     # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
 torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/train/train.py \
@@ -92,4 +101,8 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --dp_epsilon $DP_EPSILON \
     --dp_delta $DP_DELTA \
     --dp_max_grad_norm $DP_MAX_GRAD_NORM \
-    --dp_use_ghost_clipping $DP_GHOST_CLIPPING
+    --dp_use_ghost_clipping $DP_GHOST_CLIPPING \
+    --use_mimic_loader $USE_MIMIC_LOADER \
+    --mimic_filter_views $MIMIC_FILTER_VIEWS \
+    --mimic_include_reason $MIMIC_INCLUDE_REASON \
+    --mimic_generation_methods $MIMIC_GENERATION_METHODS
