@@ -225,10 +225,10 @@ class LLaVATrainer(Trainer):
                 for module in opt_model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        print(f"skipped {module}: {skipped/2**20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
                         logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                logger.info(f"skipped: {skipped/2**20}M params")
+                print(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
 
@@ -242,8 +242,8 @@ class LLaVATrainer(Trainer):
         if getattr(self.args, 'dp_enabled', False):
             from opacus import PrivacyEngine
 
-            logger.info("=" * 50)
-            logger.info("Attaching PrivacyEngine to enable Differential Privacy")
+            print("=" * 50)
+            print("Attaching PrivacyEngine to enable Differential Privacy")
 
             # Get the train dataloader
             train_dataloader = self.get_train_dataloader()
@@ -252,15 +252,15 @@ class LLaVATrainer(Trainer):
             steps_per_epoch = len(train_dataloader)
             total_steps = steps_per_epoch * self.args.num_train_epochs
 
-            logger.info(f"Steps per epoch: {steps_per_epoch}")
-            logger.info(f"Total epochs: {self.args.num_train_epochs}")
-            logger.info(f"Expected total steps: {total_steps}")
+            print(f"Steps per epoch: {steps_per_epoch}")
+            print(f"Total epochs: {self.args.num_train_epochs}")
+            print(f"Expected total steps: {total_steps}")
 
             privacy_engine = PrivacyEngine()
 
             # Choose clipping mode based on settings
             if self.args.dp_use_ghost_clipping:
-                logger.info("Using Ghost Clipping for memory efficiency")
+                print("Using Ghost Clipping for memory efficiency")
                 # With ghost clipping, make_private_with_epsilon returns 4 values including criterion
                 # We store the criterion but don't use it (LLaVA uses compute_loss directly)
                 self.model, self.optimizer, self._dp_criterion, train_dataloader = privacy_engine.make_private_with_epsilon(
@@ -273,9 +273,9 @@ class LLaVATrainer(Trainer):
                     max_grad_norm=self.args.dp_max_grad_norm,
                     grad_sample_mode="ghost",
                 )
-                logger.info("Ghost clipping criterion wrapper created")
+                print("Ghost clipping criterion wrapper created")
             else:
-                logger.info("Using standard DP clipping")
+                print("Using standard DP clipping")
                 # Without ghost clipping, returns 3 values (no criterion)
                 self.model, self.optimizer, train_dataloader = privacy_engine.make_private_with_epsilon(
                     module=self.model,
@@ -294,29 +294,29 @@ class LLaVATrainer(Trainer):
             # CRITICAL FIX: Convert trainable parameters to FP32 for DP
             # Opacus computes gradients + noise in FP32 and requires param.dtype == grad.dtype
             # This is the standard practice in DP training (see: DP-BERT, DP-GPT papers)
-            logger.info("=" * 60)
-            logger.info("Converting trainable parameters to FP32 for DP compatibility")
-            logger.info("=" * 60)
+            print("=" * 60)
+            print("Converting trainable parameters to FP32 for DP compatibility")
+            print("=" * 60)
 
             trainable_params_converted = 0
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
                     if param.dtype != torch.float32:
-                        logger.info(f"Converting {name}: {param.dtype} → FP32")
+                        print(f"Converting {name}: {param.dtype} → FP32")
                         param.data = param.data.float()
                         trainable_params_converted += 1
 
-            logger.info(f"Converted {trainable_params_converted} trainable parameters to FP32")
-            logger.info("=" * 60)
+            print(f"Converted {trainable_params_converted} trainable parameters to FP32")
+            print("=" * 60)
 
             # CRITICAL FIX: Re-apply dtype to vision_tower (frozen, non-trainable)
             # Vision tower should stay in BF16/FP16 for efficiency
             # DO NOT convert mm_projector here - it's trainable and must stay FP32!
             target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)
-            logger.info("=" * 60)
-            logger.info(f"DTYPE FIX: Re-applying {target_dtype} to frozen vision_tower only")
-            logger.info("(Trainable mm_projector stays in FP32 for DP)")
-            logger.info("=" * 60)
+            print("=" * 60)
+            print(f"DTYPE FIX: Re-applying {target_dtype} to frozen vision_tower only")
+            print("(Trainable mm_projector stays in FP32 for DP)")
+            print("=" * 60)
 
             # Recursive function to find vision_tower (but NOT mm_projector)
             def find_and_fix_vision_tower(module, depth=0, max_depth=10, path="root"):
@@ -328,10 +328,10 @@ class LLaVATrainer(Trainer):
 
                 # Check current level for vision_tower ONLY
                 if hasattr(module, 'vision_tower') and module.vision_tower is not None:
-                    logger.info(f"{indent}✓ Found vision_tower at [{path}]")
-                    logger.info(f"{indent}  Before: dtype={module.vision_tower.dtype}")
+                    print(f"{indent}✓ Found vision_tower at [{path}]")
+                    print(f"{indent}  Before: dtype={module.vision_tower.dtype}")
                     module.vision_tower.to(device=self.args.device, dtype=target_dtype)
-                    logger.info(f"{indent}  After: dtype={module.vision_tower.dtype}")
+                    print(f"{indent}  After: dtype={module.vision_tower.dtype}")
 
                 # DO NOT touch mm_projector - it's trainable and must stay FP32!
 
@@ -345,24 +345,24 @@ class LLaVATrainer(Trainer):
             # Start the recursive search - find vision_tower only
             find_and_fix_vision_tower(self.model)
 
-            logger.info("=" * 60)
-            logger.info("Dtype fix attempt completed")
-            logger.info("=" * 60)
+            print("=" * 60)
+            print("Dtype fix attempt completed")
+            print("=" * 60)
 
             # Final verification: check dtypes of key components
-            logger.info("=" * 60)
-            logger.info("FINAL DTYPE VERIFICATION")
-            logger.info("=" * 60)
+            print("=" * 60)
+            print("FINAL DTYPE VERIFICATION")
+            print("=" * 60)
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
-                    logger.info(f"Trainable: {name[:80]:80s} dtype={param.dtype}")
+                    print(f"Trainable: {name[:80]:80s} dtype={param.dtype}")
                     if param.dtype != torch.float32:
-                        logger.warning(f"⚠️  WARNING: Trainable param {name} is not FP32!")
-            logger.info("=" * 60)
+                        print(f"⚠️  WARNING: Trainable param {name} is not FP32!")
+            print("=" * 60)
 
-            logger.info(f"PrivacyEngine attached successfully")
-            logger.info(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
-            logger.info("=" * 50)
+            print(f"PrivacyEngine attached successfully")
+            print(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
+            print("=" * 50)
 
     def get_train_dataloader(self):
         """
@@ -408,7 +408,7 @@ class LLaVATrainer(Trainer):
             epsilon = self.privacy_engine.get_epsilon(self.args.dp_delta)
             logs["privacy/epsilon"] = epsilon
             logs["privacy/delta"] = self.args.dp_delta
-            logger.info(f"Current Privacy Budget: (ε={epsilon:.2f}, δ={self.args.dp_delta})")
+            print(f"Current Privacy Budget: (ε={epsilon:.2f}, δ={self.args.dp_delta})")
 
         super().log(logs)
 
