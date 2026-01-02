@@ -298,48 +298,40 @@ class LLaVATrainer(Trainer):
             logger.info(f"DTYPE FIX: Re-applying {target_dtype} after DP wrapping")
             logger.info("=" * 60)
 
-            # Recursive function to find vision_tower and mm_projector
-            def find_and_fix_modules(module, depth=0, max_depth=10):
+            # Recursive function to find ALL instances of vision_tower and mm_projector
+            def find_and_fix_modules(module, depth=0, max_depth=10, path="root"):
                 if depth > max_depth:
-                    return False
+                    return
 
                 indent = "  " * depth
                 module_type = type(module).__name__
-                logger.info(f"{indent}Checking layer {depth}: {module_type}")
-
-                fixed_vision = False
-                fixed_projector = False
+                logger.info(f"{indent}[{path}] {module_type}")
 
                 # Check current level for vision_tower
                 if hasattr(module, 'vision_tower') and module.vision_tower is not None:
-                    logger.info(f"{indent}✓ Found vision_tower at depth {depth}!")
-                    logger.info(f"{indent}  Before: dtype={module.vision_tower.dtype}")
+                    logger.info(f"{indent}  ✓ Found vision_tower!")
+                    logger.info(f"{indent}    Before: dtype={module.vision_tower.dtype}, id={id(module.vision_tower)}")
                     module.vision_tower.to(device=self.args.device, dtype=target_dtype)
-                    logger.info(f"{indent}  After: dtype={module.vision_tower.dtype}")
-                    fixed_vision = True
+                    logger.info(f"{indent}    After: dtype={module.vision_tower.dtype}")
 
                 # Check current level for mm_projector
                 if hasattr(module, 'mm_projector') and module.mm_projector is not None:
-                    logger.info(f"{indent}✓ Found mm_projector at depth {depth}!")
+                    logger.info(f"{indent}  ✓ Found mm_projector!")
+                    logger.info(f"{indent}    dtype={module.mm_projector[0].weight.dtype if hasattr(module.mm_projector, '__getitem__') else 'N/A'}")
                     module.mm_projector.to(device=self.args.device, dtype=target_dtype)
-                    fixed_projector = True
 
-                # If found both, we're done
-                if fixed_vision and fixed_projector:
-                    return True
-
-                # Otherwise, unwrap and recurse
-                for attr_name in ['_module', 'base_model', 'model']:
+                # Recurse through ALL possible wrapper attributes
+                for attr_name in ['_module', 'base_model', 'model', 'modules_to_save']:
                     if hasattr(module, attr_name):
                         child = getattr(module, attr_name)
                         if child is not None and child is not module:
-                            logger.info(f"{indent}→ Unwrapping {attr_name}...")
-                            if find_and_fix_modules(child, depth + 1, max_depth):
-                                return True
+                            if isinstance(child, dict):
+                                for key, val in child.items():
+                                    find_and_fix_modules(val, depth + 1, max_depth, f"{path}.{attr_name}[{key}]")
+                            else:
+                                find_and_fix_modules(child, depth + 1, max_depth, f"{path}.{attr_name}")
 
-                return fixed_vision or fixed_projector
-
-            # Start the recursive search
+            # Start the recursive search - find ALL instances
             find_and_fix_modules(self.model)
 
             logger.info("=" * 60)
