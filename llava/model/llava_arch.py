@@ -142,6 +142,10 @@ class LlavaMetaForCausalLM(ABC):
         # Cast vision outputs to fp32 before projector for mixed-precision + DP safety
         image_features = image_features.float()
         image_features = self.get_model().mm_projector(image_features)
+        # Align projector output with language model dtype to avoid matmul dtype mismatches
+        lm_dtype = self.get_model().embed_tokens.weight.dtype
+        if image_features.dtype != lm_dtype:
+            image_features = image_features.to(dtype=lm_dtype)
         return image_features
 
     def prepare_inputs_labels_for_multimodal(
