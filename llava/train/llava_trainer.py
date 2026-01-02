@@ -291,6 +291,24 @@ class LLaVATrainer(Trainer):
             self.privacy_engine = privacy_engine
             self._train_dataloader = train_dataloader
 
+            # CRITICAL FIX: Convert trainable parameters to FP32 for DP
+            # Opacus computes gradients + noise in FP32 and requires param.dtype == grad.dtype
+            # This is the standard practice in DP training (see: DP-BERT, DP-GPT papers)
+            logger.info("=" * 60)
+            logger.info("Converting trainable parameters to FP32 for DP compatibility")
+            logger.info("=" * 60)
+
+            trainable_params_converted = 0
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    if param.dtype != torch.float32:
+                        logger.info(f"Converting {name}: {param.dtype} → FP32")
+                        param.data = param.data.float()
+                        trainable_params_converted += 1
+
+            logger.info(f"Converted {trainable_params_converted} trainable parameters to FP32")
+            logger.info("=" * 60)
+
             # CRITICAL FIX: Re-apply dtype to vision_tower after Opacus wrapping
             # Root cause: Opacus resets vision_tower dtype, breaking clip_encoder.py:54-55
             target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)

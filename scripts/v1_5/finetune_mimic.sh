@@ -49,6 +49,9 @@ DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recomme
 # - ε=1.0: Very strong privacy (may reduce model utility)
 # - ε=3.0-8.0: Moderate privacy (good balance)
 # - ε=10.0+: Weaker privacy (better utility)
+
+# NOTE: The trainer automatically converts trainable parameters to FP32 for DP
+# Non-trainable parts (vision tower, frozen base) remain in BF16 for efficiency
 # deepspeed 
     # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
 torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
