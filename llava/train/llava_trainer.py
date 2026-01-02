@@ -375,14 +375,12 @@ class LLaVATrainer(Trainer):
         return super().get_train_dataloader()
 
     def training_step(self, model, inputs):
-        """
-        Perform a training step on a batch of inputs with DP support.
-        """
-        # If DP is not enabled, use the default training step
         if not getattr(self.args, 'dp_enabled', False):
             return super().training_step(model, inputs)
 
-        # DP-enabled training step
+        # Opacus requires a fresh grad buffer every step
+        self.optimizer.zero_grad(set_to_none=True)
+
         model.train()
         inputs = self._prepare_inputs(inputs)
 
@@ -398,6 +396,7 @@ class LLaVATrainer(Trainer):
         loss.backward()
 
         return loss.detach()
+
 
     def log(self, logs):
         """
