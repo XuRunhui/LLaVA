@@ -132,6 +132,10 @@ class LengthGroupedSampler(Sampler):
 
 class LLaVATrainer(Trainer):
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.privacy_engine = None
+
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         if self.train_dataset is None or not has_length(self.train_dataset):
             return None
@@ -226,6 +230,113 @@ class LLaVATrainer(Trainer):
                 logger.info(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
+
+    def create_optimizer_and_scheduler(self, num_training_steps: int):
+        """
+        Setup the optimizer, scheduler and potentially attach PrivacyEngine.
+        """
+        super().create_optimizer_and_scheduler(num_training_steps)
+
+        # Attach PrivacyEngine if DP is enabled
+        if getattr(self.args, 'dp_enabled', False):
+            from opacus import PrivacyEngine
+
+            logger.info("=" * 50)
+            logger.info("Attaching PrivacyEngine to enable Differential Privacy")
+
+            # Get the train dataloader
+            train_dataloader = self.get_train_dataloader()
+
+            # Calculate expected steps
+            steps_per_epoch = len(train_dataloader)
+            total_steps = steps_per_epoch * self.args.num_train_epochs
+
+            logger.info(f"Steps per epoch: {steps_per_epoch}")
+            logger.info(f"Total epochs: {self.args.num_train_epochs}")
+            logger.info(f"Expected total steps: {total_steps}")
+
+            privacy_engine = PrivacyEngine()
+
+            # Choose clipping mode based on settings
+            if self.args.dp_use_ghost_clipping:
+                logger.info("Using Ghost Clipping for memory efficiency")
+                self.model, self.optimizer, train_dataloader = privacy_engine.make_private_with_epsilon(
+                    module=self.model,
+                    optimizer=self.optimizer,
+                    data_loader=train_dataloader,
+                    target_epsilon=self.args.dp_epsilon,
+                    target_delta=self.args.dp_delta,
+                    epochs=int(self.args.num_train_epochs),
+                    max_grad_norm=self.args.dp_max_grad_norm,
+                    grad_sample_mode="ghost",
+                )
+            else:
+                logger.info("Using standard DP clipping")
+                self.model, self.optimizer, train_dataloader = privacy_engine.make_private_with_epsilon(
+                    module=self.model,
+                    optimizer=self.optimizer,
+                    data_loader=train_dataloader,
+                    target_epsilon=self.args.dp_epsilon,
+                    target_delta=self.args.dp_delta,
+                    epochs=int(self.args.num_train_epochs),
+                    max_grad_norm=self.args.dp_max_grad_norm,
+                )
+
+            # Store privacy engine and updated dataloader
+            self.privacy_engine = privacy_engine
+            self._train_dataloader = train_dataloader
+
+            logger.info(f"PrivacyEngine attached successfully")
+            logger.info(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
+            logger.info("=" * 50)
+
+    def get_train_dataloader(self):
+        """
+        Returns the training dataloader.
+        For DP training, we return the Opacus-wrapped dataloader after initialization.
+        """
+        if getattr(self.args, 'dp_enabled', False) and hasattr(self, '_train_dataloader'):
+            return self._train_dataloader
+
+        return super().get_train_dataloader()
+
+    def training_step(self, model, inputs):
+        """
+        Perform a training step on a batch of inputs with DP support.
+        """
+        # If DP is not enabled, use the default training step
+        if not getattr(self.args, 'dp_enabled', False):
+            return super().training_step(model, inputs)
+
+        # DP-enabled training step
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()
+
+        if self.args.gradient_accumulation_steps > 1:
+            loss = loss / self.args.gradient_accumulation_steps
+
+        loss.backward()
+
+        return loss.detach()
+
+    def log(self, logs):
+        """
+        Log metrics including privacy metrics if DP is enabled.
+        """
+        # Add privacy budget to logs if DP is enabled
+        if getattr(self.args, 'dp_enabled', False) and self.privacy_engine is not None:
+            epsilon = self.privacy_engine.get_epsilon(self.args.dp_delta)
+            logs["privacy/epsilon"] = epsilon
+            logs["privacy/delta"] = self.args.dp_delta
+            logger.info(f"Current Privacy Budget: (ε={epsilon:.2f}, δ={self.args.dp_delta})")
+
+        super().log(logs)
 
     def _save_checkpoint(self, model, trial, metrics=None):
         if getattr(self.args, 'tune_mm_mlp_adapter', False):

@@ -32,6 +32,23 @@ OUTPUT_DIR="/root/autodl-tmp/mimic_cxr_jpg/output/llava_llavarad/lora_128"
 # Number of GPUs (adjust based on your setup)
 NUM_GPUS=1
 MASTER_PORT=29500
+
+# ====================================
+# Differential Privacy Configuration
+# ====================================
+# IMPORTANT: DP training protects patient privacy in medical data
+# Set DP_ENABLED=False to train without differential privacy
+
+DP_ENABLED=True              # Set to False to disable DP
+DP_EPSILON=8.0               # Privacy budget (lower = more private, e.g., 1.0-10.0)
+DP_DELTA=1e-5                # Privacy parameter (typically 1/dataset_size)
+DP_MAX_GRAD_NORM=1.0         # Gradient clipping threshold (adjust based on convergence)
+DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recommended for large models)
+
+# Privacy Budget Guide:
+# - ε=1.0: Very strong privacy (may reduce model utility)
+# - ε=3.0-8.0: Moderate privacy (good balance)
+# - ε=10.0+: Weaker privacy (better utility)
 # deepspeed 
     # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
 torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
@@ -67,4 +84,9 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --model_max_length 2048 \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
-    --report_to none
+    --report_to none \
+    --dp_enabled $DP_ENABLED \
+    --dp_epsilon $DP_EPSILON \
+    --dp_delta $DP_DELTA \
+    --dp_max_grad_norm $DP_MAX_GRAD_NORM \
+    --dp_use_ghost_clipping $DP_GHOST_CLIPPING

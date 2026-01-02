@@ -111,6 +111,13 @@ class TrainingArguments(transformers.TrainingArguments):
     mm_projector_lr: Optional[float] = None
     group_by_modality_length: bool = field(default=False)
 
+    # Differential Privacy parameters
+    dp_enabled: bool = field(default=False, metadata={"help": "Enable differential privacy training"})
+    dp_epsilon: float = field(default=8.0, metadata={"help": "Target epsilon for DP"})
+    dp_delta: float = field(default=1e-5, metadata={"help": "Target delta for DP"})
+    dp_max_grad_norm: float = field(default=1.0, metadata={"help": "Max gradient norm for DP clipping"})
+    dp_use_ghost_clipping: bool = field(default=True, metadata={"help": "Use ghost clipping for memory efficiency"})
+
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     try:
@@ -967,6 +974,27 @@ def train(attn_implementation=None):
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
+
+    # Opacus Differential Privacy Integration
+    if training_args.dp_enabled:
+        from opacus.validators import ModuleValidator
+
+        rank0_print("=" * 50)
+        rank0_print("Enabling Differential Privacy with Opacus")
+        rank0_print(f"Target Epsilon: {training_args.dp_epsilon}")
+        rank0_print(f"Target Delta: {training_args.dp_delta}")
+        rank0_print(f"Max Grad Norm: {training_args.dp_max_grad_norm}")
+        rank0_print(f"Ghost Clipping: {training_args.dp_use_ghost_clipping}")
+        rank0_print("=" * 50)
+
+        # Check if model is compatible with Opacus
+        if not ModuleValidator.is_valid(model):
+            rank0_print("Model is not compatible with Opacus. Attempting to fix...")
+            model = ModuleValidator.fix(model)
+            rank0_print("Model fixed for Opacus compatibility")
+        else:
+            rank0_print("Model is compatible with Opacus")
+
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,

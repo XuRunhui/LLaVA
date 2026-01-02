@@ -9,10 +9,12 @@ dist
 *.log.*
 *.json
 *.jsonl
+*.out
 
 # Data
 !**/alpaca-data-conversation.json
-
+mimic-cxr-jpg/
+p10*
 # Editor
 .idea
 *.swp
