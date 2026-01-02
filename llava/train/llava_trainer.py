@@ -293,40 +293,58 @@ class LLaVATrainer(Trainer):
 
             # CRITICAL FIX: Re-apply dtype to vision_tower after Opacus wrapping
             # Root cause: Opacus resets vision_tower dtype, breaking clip_encoder.py:54-55
-            # The vision tower uses self.dtype to process images, then returns .to(images.dtype)
-            # If self.dtype is wrong (fp32 instead of bf16), the output dtype will be wrong
             target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)
-            logger.info(f"Re-applying dtype {target_dtype} after DP wrapping to fix vision_tower...")
+            logger.info("=" * 60)
+            logger.info(f"DTYPE FIX: Re-applying {target_dtype} after DP wrapping")
+            logger.info("=" * 60)
 
-            # Unwrap model layers to access vision_tower directly
-            # Structure: GradSampleModule(_module) -> PeftModel(base_model/model) -> LlavaLlamaForCausalLM(model) -> LlavaLlamaModel(vision_tower)
-            inner_model = self.model
+            # Recursive function to find vision_tower and mm_projector
+            def find_and_fix_modules(module, depth=0, max_depth=10):
+                if depth > max_depth:
+                    return False
 
-            # Unwrap Opacus GradSampleModule
-            if hasattr(inner_model, '_module'):
-                inner_model = inner_model._module
-                logger.info("Unwrapped Opacus GradSampleModule")
+                indent = "  " * depth
+                module_type = type(module).__name__
+                logger.info(f"{indent}Checking layer {depth}: {module_type}")
 
-            # Unwrap PEFT model
-            if hasattr(inner_model, 'base_model'):
-                inner_model = inner_model.base_model
-                logger.info("Unwrapped PEFT model")
-            elif hasattr(inner_model, 'model') and hasattr(inner_model.model, 'vision_tower'):
-                inner_model = inner_model.model
-                logger.info("Accessed inner LlavaLlamaModel")
+                fixed_vision = False
+                fixed_projector = False
 
-            # Now fix vision_tower dtype
-            if hasattr(inner_model, 'vision_tower') and inner_model.vision_tower is not None:
-                logger.info(f"Found vision_tower, converting to {target_dtype}...")
-                inner_model.vision_tower.to(device=self.args.device, dtype=target_dtype)
-                logger.info(f"Vision tower dtype is now: {inner_model.vision_tower.dtype}")
+                # Check current level for vision_tower
+                if hasattr(module, 'vision_tower') and module.vision_tower is not None:
+                    logger.info(f"{indent}✓ Found vision_tower at depth {depth}!")
+                    logger.info(f"{indent}  Before: dtype={module.vision_tower.dtype}")
+                    module.vision_tower.to(device=self.args.device, dtype=target_dtype)
+                    logger.info(f"{indent}  After: dtype={module.vision_tower.dtype}")
+                    fixed_vision = True
 
-            # Also fix mm_projector dtype
-            if hasattr(inner_model, 'mm_projector'):
-                logger.info(f"Converting mm_projector to {target_dtype}...")
-                inner_model.mm_projector.to(device=self.args.device, dtype=target_dtype)
+                # Check current level for mm_projector
+                if hasattr(module, 'mm_projector') and module.mm_projector is not None:
+                    logger.info(f"{indent}✓ Found mm_projector at depth {depth}!")
+                    module.mm_projector.to(device=self.args.device, dtype=target_dtype)
+                    fixed_projector = True
 
-            logger.info(f"Dtype consistency fix completed for multimodal components")
+                # If found both, we're done
+                if fixed_vision and fixed_projector:
+                    return True
+
+                # Otherwise, unwrap and recurse
+                for attr_name in ['_module', 'base_model', 'model']:
+                    if hasattr(module, attr_name):
+                        child = getattr(module, attr_name)
+                        if child is not None and child is not module:
+                            logger.info(f"{indent}→ Unwrapping {attr_name}...")
+                            if find_and_fix_modules(child, depth + 1, max_depth):
+                                return True
+
+                return fixed_vision or fixed_projector
+
+            # Start the recursive search
+            find_and_fix_modules(self.model)
+
+            logger.info("=" * 60)
+            logger.info("Dtype fix attempt completed")
+            logger.info("=" * 60)
 
             logger.info(f"PrivacyEngine attached successfully")
             logger.info(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
