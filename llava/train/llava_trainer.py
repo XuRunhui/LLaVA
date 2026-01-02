@@ -291,6 +291,40 @@ class LLaVATrainer(Trainer):
             self.privacy_engine = privacy_engine
             self._train_dataloader = train_dataloader
 
+            # Fix dtype inconsistencies after Opacus wrapping
+            # Opacus can sometimes change dtypes, so we need to ensure consistency
+            target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)
+            logger.info(f"Ensuring dtype consistency after DP wrapping (target: {target_dtype})...")
+
+            # Fix specific multimodal components
+            model_base = self.model.module if hasattr(self.model, 'module') else self.model
+            if hasattr(model_base, 'get_model'):
+                inner_model = model_base.get_model()
+
+                # Fix mm_projector dtype
+                if hasattr(inner_model, 'mm_projector'):
+                    logger.info("Converting mm_projector to target dtype...")
+                    inner_model.mm_projector.to(target_dtype)
+
+                # Fix vision tower dtype
+                if hasattr(inner_model, 'vision_tower') and inner_model.vision_tower is not None:
+                    logger.info("Converting vision_tower to target dtype...")
+                    if hasattr(inner_model.vision_tower, 'vision_tower'):
+                        inner_model.vision_tower.vision_tower.to(target_dtype)
+
+            # General dtype fix for all modules
+            for name, module in self.model.named_modules():
+                if 'norm' in name.lower() or 'ln' in name.lower():
+                    # Keep normalization layers in fp32 for stability
+                    module.to(torch.float32)
+                elif isinstance(module, (nn.Linear, nn.Conv2d)):
+                    # Ensure Linear and Conv layers match target dtype
+                    if hasattr(module, 'weight') and module.weight is not None:
+                        if module.weight.dtype != target_dtype and 'norm' not in name.lower():
+                            module.to(target_dtype)
+
+            logger.info(f"Dtype consistency check completed (target: {target_dtype})")
+
             logger.info(f"PrivacyEngine attached successfully")
             logger.info(f"Training with (ε={self.args.dp_epsilon}, δ={self.args.dp_delta})-DP")
             logger.info("=" * 50)
