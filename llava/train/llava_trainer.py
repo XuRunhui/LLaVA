@@ -135,6 +135,7 @@ class LLaVATrainer(Trainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.privacy_engine = None
+        self._dp_criterion = None  # Store DP criterion for ghost clipping
 
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         if self.train_dataset is None or not has_length(self.train_dataset):
@@ -260,7 +261,9 @@ class LLaVATrainer(Trainer):
             # Choose clipping mode based on settings
             if self.args.dp_use_ghost_clipping:
                 logger.info("Using Ghost Clipping for memory efficiency")
-                self.model, self.optimizer, train_dataloader = privacy_engine.make_private_with_epsilon(
+                # With ghost clipping, make_private_with_epsilon returns 4 values including criterion
+                # We store the criterion but don't use it (LLaVA uses compute_loss directly)
+                self.model, self.optimizer, self._dp_criterion, train_dataloader = privacy_engine.make_private_with_epsilon(
                     module=self.model,
                     optimizer=self.optimizer,
                     data_loader=train_dataloader,
@@ -270,8 +273,10 @@ class LLaVATrainer(Trainer):
                     max_grad_norm=self.args.dp_max_grad_norm,
                     grad_sample_mode="ghost",
                 )
+                logger.info("Ghost clipping criterion wrapper created")
             else:
                 logger.info("Using standard DP clipping")
+                # Without ghost clipping, returns 3 values (no criterion)
                 self.model, self.optimizer, train_dataloader = privacy_engine.make_private_with_epsilon(
                     module=self.model,
                     optimizer=self.optimizer,
