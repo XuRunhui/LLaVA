@@ -309,51 +309,55 @@ class LLaVATrainer(Trainer):
             logger.info(f"Converted {trainable_params_converted} trainable parameters to FP32")
             logger.info("=" * 60)
 
-            # CRITICAL FIX: Re-apply dtype to vision_tower after Opacus wrapping
-            # Root cause: Opacus resets vision_tower dtype, breaking clip_encoder.py:54-55
+            # CRITICAL FIX: Re-apply dtype to vision_tower (frozen, non-trainable)
+            # Vision tower should stay in BF16/FP16 for efficiency
+            # DO NOT convert mm_projector here - it's trainable and must stay FP32!
             target_dtype = torch.bfloat16 if self.args.bf16 else (torch.float16 if self.args.fp16 else torch.float32)
             logger.info("=" * 60)
-            logger.info(f"DTYPE FIX: Re-applying {target_dtype} after DP wrapping")
+            logger.info(f"DTYPE FIX: Re-applying {target_dtype} to frozen vision_tower only")
+            logger.info("(Trainable mm_projector stays in FP32 for DP)")
             logger.info("=" * 60)
 
-            # Recursive function to find ALL instances of vision_tower and mm_projector
-            def find_and_fix_modules(module, depth=0, max_depth=10, path="root"):
+            # Recursive function to find vision_tower (but NOT mm_projector)
+            def find_and_fix_vision_tower(module, depth=0, max_depth=10, path="root"):
                 if depth > max_depth:
                     return
 
                 indent = "  " * depth
                 module_type = type(module).__name__
-                logger.info(f"{indent}[{path}] {module_type}")
 
-                # Check current level for vision_tower
+                # Check current level for vision_tower ONLY
                 if hasattr(module, 'vision_tower') and module.vision_tower is not None:
-                    logger.info(f"{indent}  ✓ Found vision_tower!")
-                    logger.info(f"{indent}    Before: dtype={module.vision_tower.dtype}, id={id(module.vision_tower)}")
+                    logger.info(f"{indent}✓ Found vision_tower at [{path}]")
+                    logger.info(f"{indent}  Before: dtype={module.vision_tower.dtype}")
                     module.vision_tower.to(device=self.args.device, dtype=target_dtype)
-                    logger.info(f"{indent}    After: dtype={module.vision_tower.dtype}")
+                    logger.info(f"{indent}  After: dtype={module.vision_tower.dtype}")
 
-                # Check current level for mm_projector
-                if hasattr(module, 'mm_projector') and module.mm_projector is not None:
-                    logger.info(f"{indent}  ✓ Found mm_projector!")
-                    logger.info(f"{indent}    dtype={module.mm_projector[0].weight.dtype if hasattr(module.mm_projector, '__getitem__') else 'N/A'}")
-                    module.mm_projector.to(device=self.args.device, dtype=target_dtype)
+                # DO NOT touch mm_projector - it's trainable and must stay FP32!
 
-                # Recurse through ALL possible wrapper attributes
-                for attr_name in ['_module', 'base_model', 'model', 'modules_to_save']:
+                # Recurse through wrapper attributes
+                for attr_name in ['_module', 'base_model', 'model']:
                     if hasattr(module, attr_name):
                         child = getattr(module, attr_name)
                         if child is not None and child is not module:
-                            if isinstance(child, dict):
-                                for key, val in child.items():
-                                    find_and_fix_modules(val, depth + 1, max_depth, f"{path}.{attr_name}[{key}]")
-                            else:
-                                find_and_fix_modules(child, depth + 1, max_depth, f"{path}.{attr_name}")
+                            find_and_fix_vision_tower(child, depth + 1, max_depth, f"{path}.{attr_name}")
 
-            # Start the recursive search - find ALL instances
-            find_and_fix_modules(self.model)
+            # Start the recursive search - find vision_tower only
+            find_and_fix_vision_tower(self.model)
 
             logger.info("=" * 60)
             logger.info("Dtype fix attempt completed")
+            logger.info("=" * 60)
+
+            # Final verification: check dtypes of key components
+            logger.info("=" * 60)
+            logger.info("FINAL DTYPE VERIFICATION")
+            logger.info("=" * 60)
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    logger.info(f"Trainable: {name[:80]:80s} dtype={param.dtype}")
+                    if param.dtype != torch.float32:
+                        logger.warning(f"⚠️  WARNING: Trainable param {name} is not FP32!")
             logger.info("=" * 60)
 
             logger.info(f"PrivacyEngine attached successfully")
