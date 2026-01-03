@@ -39,9 +39,9 @@ MASTER_PORT=29500
 # IMPORTANT: DP training protects patient privacy in medical data
 # Set DP_ENABLED=False to train without differential privacy
 
-DP_ENABLED=False # Set to False to disable DP
+DP_ENABLED=True # Set to False to disable DP
 DP_EPSILON=8.0               # Privacy budget (lower = more private, e.g., 1.0-10.0)
-DP_DELTA=2e-5                # Privacy parameter (typically 1/dataset_size)
+DP_DELTA=5e-5                # Privacy parameter (typically 1/dataset_size)
 DP_MAX_GRAD_NORM=2.0         # Gradient clipping threshold (adjust based on convergence)
 DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recommended for large models)
 
@@ -59,7 +59,7 @@ DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recomme
 USE_MIMIC_LOADER=True            # Enable MIMIC-CXR specific data loader
 MIMIC_FILTER_VIEWS=True          # Filter to only PA/AP views (recommended)
 MIMIC_INCLUDE_REASON=True        # Include clinical indication/reason in prompts
-MIMIC_GENERATION_METHODS="all"   # Options: "all", "gpt4", or "rule-based"
+MIMIC_GENERATION_METHODS="gpt4"   # Options: "all", "gpt4", or "rule-based"
 
 # deepspeed
     # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
@@ -79,7 +79,7 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --group_by_modality_length True \
     --bf16 True \
     --output_dir $OUTPUT_DIR \
-    --num_train_epochs 1 \
+    --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 8 \
@@ -87,9 +87,9 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --save_strategy "steps" \
     --save_steps 100 \
     --save_total_limit 1 \
-    --learning_rate 5e-5 \
+    --learning_rate 5e-6 \
     --weight_decay 0. \
-    --warmup_ratio 0.05 \
+    --warmup_steps 100 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \

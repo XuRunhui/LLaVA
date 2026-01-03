@@ -687,15 +687,15 @@ def load_mimic_cxr_data(data_path: str, data_args: DataArguments) -> List[Dict]:
     Returns:
         Filtered list of data samples
     """
-    logging.info("=" * 80)
-    logging.info("MIMIC-CXR Data Loader - Starting data loading and filtering")
-    logging.info("=" * 80)
+    print("=" * 80)
+    print("MIMIC-CXR Data Loader - Starting data loading and filtering")
+    print("=" * 80)
 
     with open(data_path, 'r') as f:
         dataset = json.load(f)
 
     original_count = len(dataset)
-    logging.info(f"Total samples in dataset: {original_count}")
+    print(f"Total samples in dataset: {original_count}")
 
     # Counters for filtering statistics
     filtered_by_generation_method = 0
@@ -779,56 +779,56 @@ def load_mimic_cxr_data(data_path: str, data_args: DataArguments) -> List[Dict]:
         ret.append(d)
 
     # Print detailed statistics
-    logging.info("")
-    logging.info("=" * 80)
-    logging.info("MIMIC-CXR Data Filtering Summary")
-    logging.info("=" * 80)
-    logging.info(f"Total samples loaded:           {original_count:,}")
-    logging.info(f"Samples after filtering:        {len(ret):,}")
-    logging.info(f"Samples filtered out:           {original_count - len(ret):,} ({100 * (original_count - len(ret)) / original_count:.1f}%)")
-    logging.info("")
+    print("")
+    print("=" * 80)
+    print("MIMIC-CXR Data Filtering Summary")
+    print("=" * 80)
+    print(f"Total samples loaded:           {original_count:,}")
+    print(f"Samples after filtering:        {len(ret):,}")
+    print(f"Samples filtered out:           {original_count - len(ret):,} ({100 * (original_count - len(ret)) / original_count:.1f}%)")
+    print("")
 
-    logging.info("-" * 80)
-    logging.info("Filtering Breakdown:")
-    logging.info("-" * 80)
-    logging.info(f"  Filtered by generation method:  {filtered_by_generation_method:,}")
-    logging.info(f"  Filtered by invalid findings:   {filtered_by_invalid_findings:,}")
-    logging.info(f"  Filtered by view type:          {filtered_by_view:,}")
-    logging.info("")
+    print("-" * 80)
+    print("Filtering Breakdown:")
+    print("-" * 80)
+    print(f"  Filtered by generation method:  {filtered_by_generation_method:,}")
+    print(f"  Filtered by invalid findings:   {filtered_by_invalid_findings:,}")
+    print(f"  Filtered by view type:          {filtered_by_view:,}")
+    print("")
 
-    logging.info("-" * 80)
-    logging.info("Generation Method Distribution (in original dataset):")
-    logging.info("-" * 80)
+    print("-" * 80)
+    print("Generation Method Distribution (in original dataset):")
+    print("-" * 80)
     for method, count in sorted(generation_method_counts.items(), key=lambda x: x[1], reverse=True):
-        logging.info(f"  {method:20s}: {count:,} ({100 * count / original_count:.1f}%)")
-    logging.info(f"  Selected method: {data_args.mimic_generation_methods}")
-    logging.info("")
+        print(f"  {method:20s}: {count:,} ({100 * count / original_count:.1f}%)")
+    print(f"  Selected method: {data_args.mimic_generation_methods}")
+    print("")
 
-    logging.info("-" * 80)
-    logging.info("View Type Distribution (in original dataset):")
-    logging.info("-" * 80)
+    print("-" * 80)
+    print("View Type Distribution (in original dataset):")
+    print("-" * 80)
     for view_type, count in sorted(view_counts.items(), key=lambda x: x[1], reverse=True):
-        logging.info(f"  {view_type:20s}: {count:,} ({100 * count / original_count:.1f}%)")
+        print(f"  {view_type:20s}: {count:,} ({100 * count / original_count:.1f}%)")
     if data_args.mimic_filter_views:
-        logging.info(f"  Filtered to: PA/AP views only")
+        print(f"  Filtered to: PA/AP views only")
     else:
-        logging.info(f"  No view filtering applied")
-    logging.info("")
+        print(f"  No view filtering applied")
+    print("")
 
-    logging.info("-" * 80)
-    logging.info("Clinical Indication/Reason:")
-    logging.info("-" * 80)
+    print("-" * 80)
+    print("Clinical Indication/Reason:")
+    print("-" * 80)
     if data_args.mimic_include_reason:
-        logging.info(f"  Samples with reason included:   {samples_with_reason:,}")
-        logging.info(f"  Samples without reason:         {samples_without_reason:,}")
-        logging.info(f"  Reason inclusion: ENABLED")
+        print(f"  Samples with reason included:   {samples_with_reason:,}")
+        print(f"  Samples without reason:         {samples_without_reason:,}")
+        print(f"  Reason inclusion: ENABLED")
     else:
-        logging.info(f"  Reason inclusion: DISABLED")
-    logging.info("")
+        print(f"  Reason inclusion: DISABLED")
+    print("")
 
-    logging.info("=" * 80)
-    logging.info(f"Final dataset size: {len(ret):,} samples")
-    logging.info("=" * 80)
+    print("=" * 80)
+    print(f"Final dataset size: {len(ret):,} samples")
+    print("=" * 80)
 
     return ret
 
