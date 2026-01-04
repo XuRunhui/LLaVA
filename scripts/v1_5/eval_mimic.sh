@@ -20,7 +20,7 @@ conda activate llava
 # Model Configuration
 # ====================================
 # TODO: Update these paths to your trained model checkpoint
-MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8/checkpoint-XXX"
+MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8"
 MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 
 # ====================================
@@ -32,7 +32,7 @@ IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/mimic-cxr-jpg/mimic-c
 
 # Extract checkpoint name for output directory
 CHECKPOINT_NAME=$(basename $MODEL_PATH)
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8/eval_results_${CHECKPOINT_NAME}"
+OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}"
 
 # ====================================
 # MIMIC-CXR Filtering Options
@@ -47,7 +47,7 @@ INCLUDE_REASON=True       # Include clinical indication in prompts
 TEMPERATURE=0.0           # Greedy decoding for reproducibility (set to 0)
 NUM_BEAMS=1               # Beam search (1 = greedy)
 MAX_NEW_TOKENS=512        # Maximum length of generated findings
-TOP_P=None                # Top-p sampling (None = disabled)
+# TOP_P=None                # Top-p sampling (None = disabled)
 
 # ====================================
 # Conversation Mode
@@ -72,7 +72,8 @@ echo ""
 echo "Evaluating on DEV set..."
 echo "------------------------------------------"
 
-python /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/eval/eval_mimic_cxr.py \
+# Build command with optional top-p argument
+CMD="python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr.py \
     --model-path $MODEL_PATH \
     --model-base $MODEL_BASE \
     --data-file $DATA_PATH_DEV \
@@ -83,9 +84,17 @@ python /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/eval/eval_mimic_cx
     --include-reason $INCLUDE_REASON \
     --temperature $TEMPERATURE \
     --num-beams $NUM_BEAMS \
-    --max-new-tokens $MAX_NEW_TOKENS \
-    --top-p $TOP_P \
-    --conv-mode $CONV_MODE
+    --max-new-tokens $MAX_NEW_TOKENS"
+
+# Add top-p if defined
+if [ -n "${TOP_P+x}" ]; then
+    CMD="$CMD --top-p $TOP_P"
+fi
+
+CMD="$CMD --conv-mode $CONV_MODE"
+
+# Execute command
+eval $CMD
 
 echo ""
 echo "DEV set evaluation complete!"
@@ -99,7 +108,8 @@ echo ""
 echo "Evaluating on TEST set..."
 echo "------------------------------------------"
 
-python /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/eval/eval_mimic_cxr.py \
+# Build command with optional top-p argument
+CMD="python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr.py \
     --model-path $MODEL_PATH \
     --model-base $MODEL_BASE \
     --data-file $DATA_PATH_TEST \
@@ -110,9 +120,17 @@ python /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/eval/eval_mimic_cx
     --include-reason $INCLUDE_REASON \
     --temperature $TEMPERATURE \
     --num-beams $NUM_BEAMS \
-    --max-new-tokens $MAX_NEW_TOKENS \
-    --top-p $TOP_P \
-    --conv-mode $CONV_MODE
+    --max-new-tokens $MAX_NEW_TOKENS"
+
+# Add top-p if defined
+if [ -n "${TOP_P+x}" ]; then
+    CMD="$CMD --top-p $TOP_P"
+fi
+
+CMD="$CMD --conv-mode $CONV_MODE"
+
+# Execute command
+eval $CMD
 
 echo ""
 echo "TEST set evaluation complete!"

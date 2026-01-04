@@ -153,11 +153,13 @@ def compute_loss_and_perplexity(model, input_ids, labels, images, image_sizes):
         num_tokens: Number of valid tokens used for loss computation
     """
     with torch.no_grad():
+        device = next(model.parameters()).device
+        img_dtype = next(model.parameters()).dtype
         # Forward pass with labels to compute loss
         outputs = model(
-            input_ids=input_ids.cuda(),
-            labels=labels.cuda(),
-            images=images.cuda(),
+            input_ids=input_ids.to(device),
+            labels=labels.to(device),
+            images=images.to(device=device, dtype=img_dtype),
             image_sizes=image_sizes,
             return_dict=True
         )
@@ -189,9 +191,11 @@ def generate_prediction(model, tokenizer, input_ids, images, image_sizes, args):
         prediction: Generated text (string)
     """
     with torch.inference_mode():
+        device = next(model.parameters()).device
+        img_dtype = next(model.parameters()).dtype
         output_ids = model.generate(
-            input_ids.unsqueeze(0).cuda(),
-            images=images.cuda(),
+            input_ids.unsqueeze(0).to(device),
+            images=images.to(device=device, dtype=img_dtype),
             image_sizes=image_sizes,
             do_sample=True if args.temperature > 0 else False,
             temperature=args.temperature,
@@ -218,6 +222,17 @@ def eval_model(args):
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
 
+    # Force LLaVA LoRA loading if model_base is provided
+    # The model builder requires BOTH "llava" and "lora" in the model name
+    if args.model_base:
+        # Add "llava" if not present (required to enter LLaVA loading path)
+        if 'llava' not in model_name.lower():
+            model_name = 'llava-' + model_name
+        # Add "lora" if not present (required to enter LoRA loading path)
+        if 'lora' not in model_name.lower():
+            model_name = model_name + '-lora'
+        print(f"Model name updated to: {model_name} (to trigger LLaVA LoRA loading)")
+
     print(f"Loading model from: {model_path}")
     if args.model_base:
         print(f"Using base model: {args.model_base}")
@@ -228,6 +243,16 @@ def eval_model(args):
         model_name,
         device_map="auto"
     )
+
+    # Optional dtype summary (no conversion)
+    print("\nDtype summary (no conversion):")
+    dtype_counts = {}
+    for name, param in model.named_parameters():
+        dtype_str = str(param.dtype)
+        dtype_counts[dtype_str] = dtype_counts.get(dtype_str, 0) + 1
+        if 'lm_head' in name or 'embed' in name or 'mm_projector' in name:
+            print(f"  {name[:60]:60s} dtype={param.dtype}")
+    print(f"\nDtype summary: {dtype_counts}\n")
 
     model.eval()  # Set to evaluation mode
 
@@ -285,46 +310,46 @@ def eval_model(args):
 
     # Evaluation loop
     for batch_idx, (input_ids, full_input_ids, labels, images, image_sizes, metadata) in enumerate(tqdm(dataloader)):
-        try:
-            # Compute loss and perplexity
-            loss, perplexity, num_tokens = compute_loss_and_perplexity(
-                model, full_input_ids, labels, images, image_sizes
-            )
+        # try:
+        # Compute loss and perplexity
+        loss, perplexity, num_tokens = compute_loss_and_perplexity(
+            model, full_input_ids, labels, images, image_sizes
+        )
 
-            # Generate prediction
-            prediction = generate_prediction(
-                model, tokenizer, input_ids, images, image_sizes, args
-            )
+        # Generate prediction
+        prediction = generate_prediction(
+            model, tokenizer, input_ids, images, image_sizes, args
+        )
 
-            # Accumulate metrics
-            total_loss += loss * num_tokens
-            total_perplexity += perplexity * num_tokens
-            total_tokens += num_tokens
-            num_samples += 1
+        # Accumulate metrics
+        total_loss += loss * num_tokens
+        total_perplexity += perplexity * num_tokens
+        total_tokens += num_tokens
+        num_samples += 1
 
-            # Prepare result
-            result = {
-                "id": metadata["id"],
-                "image": metadata["image"],
-                "question": metadata["question"],
-                "ground_truth": metadata["ground_truth"],
-                "prediction": prediction,
-                "loss": loss,
-                "perplexity": perplexity,
-                "num_tokens": num_tokens,
-                "view": metadata["view"],
-                "generate_method": metadata["generate_method"],
-                "answer_id": shortuuid.uuid(),
-                "model_id": model_name,
-            }
+        # Prepare result
+        result = {
+            "id": metadata["id"],
+            "image": metadata["image"],
+            "question": metadata["question"],
+            "ground_truth": metadata["ground_truth"],
+            "prediction": prediction,
+            "loss": loss,
+            "perplexity": perplexity,
+            "num_tokens": num_tokens,
+            "view": metadata["view"],
+            "generate_method": metadata["generate_method"],
+            "answer_id": shortuuid.uuid(),
+            "model_id": model_name,
+        }
 
-            # Write result incrementally (in case of crashes)
-            with open(output_file, 'a') as f:
-                f.write(json.dumps(result) + '\n')
+        # Write result incrementally (in case of crashes)
+        with open(output_file, 'a') as f:
+            f.write(json.dumps(result) + '\n')
 
-        except Exception as e:
-            print(f"\nError processing sample {metadata['id']}: {e}")
-            continue
+        # except Exception as e:
+        #     print(f"\nError processing sample {metadata['id']}: {e}")
+        #     continue
 
     # Compute average metrics
     if total_tokens > 0:

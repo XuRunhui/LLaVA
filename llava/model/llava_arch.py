@@ -139,10 +139,15 @@ class LlavaMetaForCausalLM(ABC):
 
     def encode_images(self, images):
         image_features = self.get_model().get_vision_tower()(images)
-        # Cast vision outputs to fp32 before projector for mixed-precision + DP safety
-        image_features = image_features.float()
+
+        # Match projector dtype (FP32 for DP training, FP16/BF16 for inference)
+        proj_dtype = next(self.get_model().mm_projector.parameters()).dtype
+        if image_features.dtype != proj_dtype:
+            image_features = image_features.to(dtype=proj_dtype)
+
         image_features = self.get_model().mm_projector(image_features)
-        # Align projector output with language model dtype to avoid matmul dtype mismatches
+
+        # Align to LM/embed_tokens dtype for downstream matmuls
         lm_dtype = self.get_model().embed_tokens.weight.dtype
         if image_features.dtype != lm_dtype:
             image_features = image_features.to(dtype=lm_dtype)
@@ -231,6 +236,15 @@ class LlavaMetaForCausalLM(ABC):
         _input_ids = input_ids
         input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
         labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
+
+        # Ensure we have enough image feature batches for the number of image tokens
+        total_num_images = sum((cur_input_ids == IMAGE_TOKEN_INDEX).sum().item() for cur_input_ids in input_ids)
+        if isinstance(image_features, torch.Tensor) and image_features.shape[0] < total_num_images:
+            # Common case: single image provided but multiple <image> tokens present (e.g., templates)
+            if image_features.shape[0] == 1 and total_num_images > 1:
+                image_features = image_features.expand(total_num_images, *image_features.shape[1:])
+            else:
+                raise IndexError(f"Not enough image features ({image_features.shape[0]}) for {total_num_images} image tokens.")
 
         new_input_embeds = []
         new_labels = []
