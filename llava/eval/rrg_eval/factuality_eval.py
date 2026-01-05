@@ -1,5 +1,6 @@
 import copy
 import numpy as np
+import warnings
 from sklearn.metrics import f1_score, confusion_matrix, classification_report
 from statsmodels.stats.inter_rater import cohens_kappa
 
@@ -8,6 +9,9 @@ from rrg_eval.factuality_utils import (
     map_to_binary,
     CONDITIONS, NEGATIVE, UNCERTAIN, POSITIVE
 )
+
+# Suppress sklearn UndefinedMetricWarning for cleaner output
+warnings.filterwarnings('ignore', category=UserWarning, module='sklearn.metrics._classification')
 
 
 def get_weighted_f1_weights(

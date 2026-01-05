@@ -3,7 +3,7 @@
 # Script to evaluate both dev and test sets
 # Usage: ./scripts/v1_5/eval_all_mimic_metrics.sh <model_name> [bootstrap_ci]
 
-MODEL_NAME=$1
+MODEL_NAME=${1:-"lora_128_dp_e8"}
 BOOTSTRAP_CI=${2:-"true"}
 
 if [ -z "$MODEL_NAME" ]; then
@@ -14,7 +14,7 @@ if [ -z "$MODEL_NAME" ]; then
 fi
 
 # Base paths
-EVAL_BASE_DIR="/root/autodl-tmp/mimic_cxr_jpg/output/evaluation"
+EVAL_BASE_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/"
 RESULTS_BASE_DIR="${EVAL_BASE_DIR}/eval_results_${MODEL_NAME}"
 
 # Create logs directory

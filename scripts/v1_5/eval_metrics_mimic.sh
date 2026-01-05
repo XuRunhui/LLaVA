@@ -48,7 +48,7 @@ export CUDA_VISIBLE_DEVICES=0
 SCORERS="CheXbert F1-RadGraph BLEU-1 BLEU-4 ROUGE-L"
 
 # Build command
-CMD="python /root/LLaVA/llava/eval/evaluate_mimic_metrics.py \
+CMD="python /scratch1/runhuixu/LLaVA/llava/eval/evaluate_mimic_metrics.py \
     --results_file $RESULTS_FILE \
     --output_dir $OUTPUT_DIR \
     --scorers $SCORERS"

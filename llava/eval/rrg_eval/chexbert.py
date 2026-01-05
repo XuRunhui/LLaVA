@@ -4,6 +4,7 @@ from collections import OrderedDict
 import re
 import json
 import random
+import warnings
 
 import torch
 import numpy as np
@@ -16,9 +17,12 @@ from rrg_eval.factuality_utils import CheXbert_CONDITIONS, CONDITIONS_5, map_to_
 from rrg_eval.factuality_eval import (
     generate_classification_report,
     test
-) 
+)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Suppress sklearn UndefinedMetricWarning for cleaner output
+warnings.filterwarnings('ignore', category=UserWarning, module='sklearn.metrics._classification')
 
 
 class UnlabeledDataset(torch.utils.data.Dataset):
