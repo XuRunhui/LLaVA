@@ -1,34 +1,40 @@
 #!/bin/bash
-#SBATCH --job-name=llava_llavarad
+#SBATCH --job-name=llava_rex_no_dp_no_reason
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
 set -euo pipefail
 
-# module purge
-# module load gcc/13.3.0
-# module load cuda/12.6.3
-# export CUDA_HOME=/apps/spack/2406/apps/linux-rocky8-x86_64_v3/gcc-13.3.0/cuda-12.6.3-4yhbknw
+module purge
+module load gcc/13.3.0
+module load cuda/12.6.3
+export CUDA_HOME=/apps/spack/2406/apps/linux-rocky8-x86_64_v3/gcc-13.3.0/cuda-12.6.3-4yhbknw
 
-# mkdir -p logs
+
+mkdir -p logs
 
 # # Conda (batch-safe) activation
-# source /home1/runhuixu/miniconda3/etc/profile.d/conda.sh
-# conda activate llava
+source /apps/conda/miniforge3/25.3.0/etc/profile.d/conda.sh
+conda activate /project2/ruishanl_1185/SDP_for_VLM/Xinyang/envs/llava_dp
+export PYTHONNOUSERSITE=1
+which python
+python -c "import sys; print(sys.executable)"
+python -c "import torch; print('torch version', torch.__version__); print('torch file', torch.__file__)"
+python -c "import torch; print('cuda available', torch.cuda.is_available()); print('torch.version.cuda', torch.version.cuda)"
 
 
 
 MODEL_NAME="liuhaotian/llava-v1.5-7b"
-DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/ReXGradient/metadata/rexgradient_train.json"
+DATA_PATH="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/ReXGradient/metadata/rexgradient_train_no_reason.json"
 IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/deid_png"
-OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_rex/lora_128_dp_e8_lr2e4"
+OUTPUT_DIR="/project2/ruishanl_1185/SDP_for_VLM/outputs/xinyang/llava_rex/lora_weight_128_no_reason"
 # Number of GPUs (adjust based on your setup)
 NUM_GPUS=1
 MASTER_PORT=29500
@@ -39,12 +45,14 @@ MASTER_PORT=29500
 # IMPORTANT: DP training protects patient privacy in medical data
 # Set DP_ENABLED=False to train without differential privacy
 
-DP_ENABLED=True              # Set to False to disable DP
+DP_ENABLED=False              # Set to False to disable DP
 DP_EPSILON=8.0               # Privacy budget (lower = more private, e.g., 1.0-10.0)
 DP_DELTA=2e-5                # Privacy parameter (typically 1/dataset_size)
 DP_MAX_GRAD_NORM=2.0         # Gradient clipping threshold (adjust based on convergence)
 DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recommended for large models)
 
+
+cd /project2/ruishanl_1185/SDP_for_VLM/Xinyang/LLaVA_DP/LLaVA
 # Privacy Budget Guide:
 # - ε=1.0: Very strong privacy (may reduce model utility)
 # - ε=3.0-8.0: Moderate privacy (good balance)
@@ -55,7 +63,7 @@ DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recomme
 # deepspeed 
     # --deepspeed /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/scripts/zero3.json \
 torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
-    /project2/ruishanl_1185/SDP_for_VLM/runhui/LLaVA/llava/train/train.py \
+    /project2/ruishanl_1185/SDP_for_VLM/Xinyang/LLaVA_DP/LLaVA/llava/train/train.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
     --model_name_or_path $MODEL_NAME\
     --version v1 \

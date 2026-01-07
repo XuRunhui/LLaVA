@@ -179,7 +179,7 @@ def load_results(filepath: str):
     with open(filepath, 'r') as f:
         for line in f:
             data = json.loads(line)
-            predictions.append(data.get("prediction", ""))
+            predictions.append(data.get("text", data.get("prediction", "")))
             references.append(data.get("ground_truth", data.get("reference", "")))
 
     return predictions, references
@@ -316,6 +316,9 @@ def main():
         predictions = filtered_preds
         references = filtered_refs
 
+    print("After filtering:", len(predictions))
+    print("Example pred:", repr(predictions[0][:200]) if predictions else "NONE")
+    print("Example ref :", repr(references[0][:200]) if references else "NONE")
     print(f"\nEvaluating with scorers: {args.scorers}")
     print(f"Bootstrap CI: {args.bootstrap_ci}")
 
