@@ -20,7 +20,7 @@ conda activate llava
 # Model Configuration
 # ====================================
 # TODO: Update these paths to your trained model checkpoint
-MODEL_PATH=${1:-"/scratch1/runhuixu/outputs/llava_llavarad/lora_128_gpt4"}
+MODEL_PATH="/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8"
 MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 
 # ====================================
@@ -39,7 +39,7 @@ OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOI
 # ====================================
 # Note: generation_methods is hardcoded to "rule-based" in eval script for test data
 FILTER_VIEWS=True         # Filter to only PA/AP views (recommended)
-INCLUDE_REASON=${2:-True}       # Include clinical indication in prompts
+INCLUDE_REASON=True       # Include clinical indication in prompts
 
 # ====================================
 # Generation Configuration
