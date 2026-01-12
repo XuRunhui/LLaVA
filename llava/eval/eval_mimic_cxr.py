@@ -258,12 +258,13 @@ def eval_model(args):
 
     # Load MIMIC-CXR data with filtering
     print(f"\nLoading MIMIC-CXR {args.split} data...")
+    print(f"Generation methods: {args.generation_methods}")
     data_list = load_mimic_cxr_data(
         data_path=args.data_file,
         split=args.split,
         filter_views=args.filter_views,
         include_reason=args.include_reason,
-        generation_methods="rule-based",  # Fixed to rule-based for evaluation
+        generation_methods=args.generation_methods,
         verbose=True
     )
 
@@ -377,7 +378,7 @@ def eval_model(args):
         "data_config": {
             "filter_views": args.filter_views,
             "include_reason": args.include_reason,
-            "generation_methods": "rule-based",
+            "generation_methods": args.generation_methods,
         }
     }
 
@@ -390,14 +391,17 @@ def eval_model(args):
     print("=" * 80)
     print("EVALUATION COMPLETE")
     print("=" * 80)
-    print(f"Split:              {args.split}")
-    print(f"Samples processed:  {num_samples:,}")
-    print(f"Total tokens:       {total_tokens:,}")
-    print(f"Average loss:       {avg_loss:.4f}")
-    print(f"Average perplexity: {avg_perplexity:.4f}")
+    print(f"Split:                  {args.split}")
+    print(f"Generation methods:     {args.generation_methods}")
+    print(f"Filter views (PA/AP):   {args.filter_views}")
+    print(f"Include reason:         {args.include_reason}")
+    print(f"Samples processed:      {num_samples:,}")
+    print(f"Total tokens:           {total_tokens:,}")
+    print(f"Average loss:           {avg_loss:.4f}")
+    print(f"Average perplexity:     {avg_perplexity:.4f}")
     print("")
-    print(f"Results saved to:   {output_file}")
-    print(f"Summary saved to:   {summary_file}")
+    print(f"Results saved to:       {output_file}")
+    print(f"Summary saved to:       {summary_file}")
     print("=" * 80)
 
 
@@ -415,6 +419,8 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default="test", choices=["train", "dev", "test"], help="Dataset split")
     parser.add_argument("--filter-views", type=lambda x: x.lower() == 'true', default=True, help="Filter to PA/AP views only")
     parser.add_argument("--include-reason", type=lambda x: x.lower() == 'true', default=True, help="Include clinical indication in prompts")
+    parser.add_argument("--generation-methods", type=str, default="rule-based", choices=["all", "gpt4", "rule-based"],
+                        help="Which generation method to use: 'all', 'gpt4', or 'rule-based' (default: rule-based for test/dev)")
 
     # Output arguments
     parser.add_argument("--output-file", type=str, required=True, help="Path to output JSONL file")
