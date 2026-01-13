@@ -181,8 +181,8 @@ def collate_fn_batched(batch):
         full_input_ids_batch = None
         labels_batch = None
 
-    # Stack images
-    images_batch = torch.stack(images_list)
+    # Keep images as list (LLaVA expects list for batched processing)
+    images_batch = images_list
 
     return {
         'input_ids': input_ids_batch,
@@ -205,10 +205,16 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
         return [0.0] * batch_size, [0.0] * batch_size, [0] * batch_size
 
     with torch.no_grad():
+        # Convert list of image tensors to batch tensor
+        if isinstance(images, list):
+            images_tensor = torch.stack(images).to(dtype=torch.float16, device='cuda')
+        else:
+            images_tensor = images.to(dtype=torch.float16, device='cuda')
+
         outputs = model(
             input_ids=full_input_ids.cuda(),
             labels=labels.cuda(),
-            images=images.to(dtype=torch.float16, device='cuda'),
+            images=images_tensor,
             image_sizes=image_sizes,
             return_dict=True
         )
@@ -268,10 +274,16 @@ def generate_predictions_batch(model, tokenizer, input_ids, attention_mask, imag
         if args.top_p is not None:
             gen_kwargs['top_p'] = args.top_p
 
+        # Convert list of image tensors to batch tensor
+        if isinstance(images, list):
+            images_tensor = torch.stack(images).to(dtype=torch.float16, device='cuda')
+        else:
+            images_tensor = images.to(dtype=torch.float16, device='cuda')
+
         output_ids = model.generate(
             input_ids.cuda(),
             attention_mask=attention_mask.cuda(),
-            images=images.to(dtype=torch.float16, device='cuda'),
+            images=images_tensor,
             image_sizes=image_sizes,
             **gen_kwargs
         )
