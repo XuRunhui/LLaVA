@@ -98,7 +98,7 @@ class MIMICEvalDataset(Dataset):
             sep = conv_labels.sep + conv_labels.roles[1] + ": "
             question_part = prompt_labels.split(sep)[0] + sep
             question_tokens = tokenizer_image_token(question_part, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
-            question_len = question_tokens.shape[1]
+            question_len = question_tokens.shape[-1]
             labels[:question_len] = IGNORE_INDEX
         else:
             full_input_ids = None
