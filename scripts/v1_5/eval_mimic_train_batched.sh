@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=llava_mimic_eval_train_batched
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:a40:1
+#SBATCH --gres=gpu:l40s:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
