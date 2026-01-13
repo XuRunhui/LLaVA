@@ -234,16 +234,22 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
             )
 
             # Compute metrics
-            valid_mask = sample_labels[0] != IGNORE_INDEX
+            # outputs.logits shape: [1, seq_len, vocab_size]
+            # sample_labels shape: [1, seq_len]
+            logits = outputs.logits[0]  # [seq_len, vocab_size]
+            labels = sample_labels[0]    # [seq_len]
+
+            valid_mask = labels != IGNORE_INDEX
             num_valid_tokens = valid_mask.sum().item()
 
             if num_valid_tokens > 0:
-                sample_logits = outputs.logits[0][valid_mask]
-                sample_labels_valid = sample_labels[0][valid_mask]
+                # Apply mask to get valid logits and labels
+                valid_logits = logits[valid_mask]  # [num_valid, vocab_size]
+                valid_labels = labels[valid_mask]  # [num_valid]
 
                 sample_loss = torch.nn.functional.cross_entropy(
-                    sample_logits,
-                    sample_labels_valid,
+                    valid_logits,
+                    valid_labels,
                     reduction='mean'
                 )
 
