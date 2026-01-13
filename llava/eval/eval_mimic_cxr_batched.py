@@ -199,44 +199,48 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
     """
     Compute loss and perplexity for a batch.
     Returns lists of per-sample metrics.
+
+    Note: Due to LLaVA's image token handling, we process samples individually
+    within the batch to avoid image feature mismatch issues.
     """
     if full_input_ids is None or labels is None:
         batch_size = len(image_sizes)
         return [0.0] * batch_size, [0.0] * batch_size, [0] * batch_size
 
+    batch_size = full_input_ids.shape[0]
+    losses = []
+    perplexities = []
+    token_counts = []
+
+    # Process each sample individually to avoid image token mismatch
     with torch.no_grad():
-        # Convert list of image tensors to batch tensor
-        if isinstance(images, list):
-            images_tensor = torch.stack(images).to(dtype=torch.float16, device='cuda')
-        else:
-            images_tensor = images.to(dtype=torch.float16, device='cuda')
-
-        outputs = model(
-            input_ids=full_input_ids.cuda(),
-            labels=labels.cuda(),
-            images=images_tensor,
-            image_sizes=image_sizes,
-            return_dict=True
-        )
-
-        # Compute per-sample metrics
-        batch_size = full_input_ids.shape[0]
-        losses = []
-        perplexities = []
-        token_counts = []
-
-        # Get logits and compute per-sample loss
         for i in range(batch_size):
-            sample_labels = labels[i]
-            valid_mask = sample_labels != IGNORE_INDEX
+            # Get single sample (keep batch dimension for model)
+            sample_input_ids = full_input_ids[i:i+1]
+            sample_labels = labels[i:i+1]
+            if isinstance(images, list):
+                sample_image = images[i].unsqueeze(0).to(dtype=torch.float16, device='cuda')
+            else:
+                sample_image = images[i:i+1].to(dtype=torch.float16, device='cuda')
+            sample_image_sizes = [image_sizes[i]]
+
+            # Forward pass
+            outputs = model(
+                input_ids=sample_input_ids.cuda(),
+                labels=sample_labels.cuda(),
+                images=sample_image,
+                image_sizes=sample_image_sizes,
+                return_dict=True
+            )
+
+            # Compute metrics
+            valid_mask = sample_labels[0] != IGNORE_INDEX
             num_valid_tokens = valid_mask.sum().item()
 
             if num_valid_tokens > 0:
-                # Extract valid logits and labels
-                sample_logits = outputs.logits[i][valid_mask]
-                sample_labels_valid = sample_labels[valid_mask]
+                sample_logits = outputs.logits[0][valid_mask]
+                sample_labels_valid = sample_labels[0][valid_mask]
 
-                # Compute cross-entropy loss
                 sample_loss = torch.nn.functional.cross_entropy(
                     sample_logits,
                     sample_labels_valid,
@@ -251,51 +255,59 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
                 perplexities.append(0.0)
                 token_counts.append(0)
 
-        return losses, perplexities, token_counts
+    return losses, perplexities, token_counts
 
 
 def generate_predictions_batch(model, tokenizer, input_ids, attention_mask, images, image_sizes, args):
     """
     Generate predictions for a batch.
     Returns list of generated texts.
+
+    Note: Processes samples individually to avoid image token mismatch.
     """
-    with torch.inference_mode():
-        # Prepare generation kwargs
-        gen_kwargs = {
-            'do_sample': True if args.temperature > 0 else False,
-            'num_beams': args.num_beams,
-            'max_new_tokens': args.max_new_tokens,
-            'use_cache': True,
-            'pad_token_id': tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id,
-        }
-
-        if args.temperature > 0:
-            gen_kwargs['temperature'] = args.temperature
-        if args.top_p is not None:
-            gen_kwargs['top_p'] = args.top_p
-
-        # Convert list of image tensors to batch tensor
-        if isinstance(images, list):
-            images_tensor = torch.stack(images).to(dtype=torch.float16, device='cuda')
-        else:
-            images_tensor = images.to(dtype=torch.float16, device='cuda')
-
-        output_ids = model.generate(
-            input_ids.cuda(),
-            attention_mask=attention_mask.cuda(),
-            images=images_tensor,
-            image_sizes=image_sizes,
-            **gen_kwargs
-        )
-
-    # Decode predictions (exclude input tokens)
+    batch_size = input_ids.shape[0]
     predictions = []
-    for i in range(len(output_ids)):
-        # Count non-padding tokens in input
-        input_token_len = attention_mask[i].sum().item()
-        generated_tokens = output_ids[i][input_token_len:]
-        prediction = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-        predictions.append(prediction)
+
+    # Prepare generation kwargs
+    gen_kwargs = {
+        'do_sample': True if args.temperature > 0 else False,
+        'num_beams': args.num_beams,
+        'max_new_tokens': args.max_new_tokens,
+        'use_cache': True,
+        'pad_token_id': tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id,
+    }
+
+    if args.temperature > 0:
+        gen_kwargs['temperature'] = args.temperature
+    if args.top_p is not None:
+        gen_kwargs['top_p'] = args.top_p
+
+    # Process each sample individually
+    with torch.inference_mode():
+        for i in range(batch_size):
+            # Get single sample
+            sample_input_ids = input_ids[i:i+1]
+            sample_attention_mask = attention_mask[i:i+1]
+            if isinstance(images, list):
+                sample_image = images[i].unsqueeze(0).to(dtype=torch.float16, device='cuda')
+            else:
+                sample_image = images[i:i+1].to(dtype=torch.float16, device='cuda')
+            sample_image_sizes = [image_sizes[i]]
+
+            # Generate
+            output_ids = model.generate(
+                sample_input_ids.cuda(),
+                attention_mask=sample_attention_mask.cuda(),
+                images=sample_image,
+                image_sizes=sample_image_sizes,
+                **gen_kwargs
+            )
+
+            # Decode (exclude input tokens)
+            input_token_len = sample_attention_mask[0].sum().item()
+            generated_tokens = output_ids[0][input_token_len:]
+            prediction = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+            predictions.append(prediction)
 
     return predictions
 
