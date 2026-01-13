@@ -98,7 +98,7 @@ class MIMICEvalDataset(Dataset):
             sep = conv_labels.sep + conv_labels.roles[1] + ": "
             question_part = prompt_labels.split(sep)[0] + sep
             question_tokens = tokenizer_image_token(question_part, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
-            question_len = len(question_tokens)
+            question_len = question_tokens.shape[1]
             labels[:question_len] = IGNORE_INDEX
         else:
             full_input_ids = None
@@ -217,17 +217,29 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
         for i in range(batch_size):
             # Get single sample (keep batch dimension for model)
             sample_input_ids = full_input_ids[i:i+1]
-            sample_labels = labels[i:i+1]
+            if sample_input_ids.dim() == 1:
+                sample_input_ids = sample_input_ids.unsqueeze(0)
+            sample_input_ids = sample_input_ids.cuda()
+
+            sample_labels = labels[i:i+1] if labels is not None else None
+            if sample_labels is not None and sample_labels.dim() == 1:
+                sample_labels = sample_labels.unsqueeze(0)
+            sample_labels = sample_labels.cuda() if sample_labels is not None else None
             if isinstance(images, list):
                 sample_image = images[i].unsqueeze(0).to(dtype=torch.float16, device='cuda')
             else:
                 sample_image = images[i:i+1].to(dtype=torch.float16, device='cuda')
             sample_image_sizes = [image_sizes[i]]
 
+            # Ensure proper shapes
+            # sample_input_ids: [1, seq_len]
+            # sample_labels: [1, seq_len] or None
+            # sample_image: [1, C, H, W]
+
             # Forward pass
             outputs = model(
-                input_ids=sample_input_ids.cuda(),
-                labels=sample_labels.cuda(),
+                input_ids=sample_input_ids,
+                labels=sample_labels,
                 images=sample_image,
                 image_sizes=sample_image_sizes,
                 return_dict=True
