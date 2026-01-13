@@ -236,14 +236,17 @@ def compute_loss_batch(model, full_input_ids, labels, images, image_sizes):
             # Compute metrics
             # Note: logits length may differ from labels due to image embeddings being processed
             # We need to align them by taking the last N positions
-            logits = outputs.logits[0]  # [seq_len_with_images, vocab_size]
-            labels = sample_labels[0]   # [seq_len_text]
+            logits = outputs.logits[0]  # [seq_len_with_images, vocab_size] on CUDA
+            labels = sample_labels[0]   # [seq_len_text] might be on CPU
 
             # Align logits to match labels length
             # The model prepends image embeddings, so we take the tail
             if logits.shape[0] != labels.shape[0]:
                 # Take the last portion matching labels
                 logits = logits[-labels.shape[0]:]
+
+            # Ensure labels are on the same device as logits
+            labels = labels.to(logits.device)
 
             valid_mask = labels != IGNORE_INDEX
             num_valid_tokens = valid_mask.sum().item()
