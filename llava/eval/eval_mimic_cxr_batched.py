@@ -144,7 +144,7 @@ def collate_fn_batched(batch):
         padding_length = max_len_input - ids.shape[0]
         padded_ids = torch.cat([
             ids,
-            torch.full((padding_length,), self.tokenizer.pad_token_id if hasattr(self, 'tokenizer') else 0, dtype=ids.dtype)
+            torch.full((padding_length,), 0, dtype=ids.dtype)  # Pad with 0
         ])
         mask = torch.cat([
             torch.ones(ids.shape[0], dtype=torch.long),
