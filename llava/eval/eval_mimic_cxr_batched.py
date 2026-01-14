@@ -631,7 +631,7 @@ if __name__ == "__main__":
 
     # Output arguments
     parser.add_argument("--output-file", type=str, required=True)
-    parser.add_argument("--resume", type=lambda x: x.lower() == 'true', default=False,
+    parser.add_argument("--resume", type=lambda x: x.lower() == 'true', default=True,
                         help="Resume evaluation from existing results file (append mode)")
 
     # Batching arguments
