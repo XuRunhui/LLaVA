@@ -36,6 +36,60 @@ from PIL import Image
 from mimic_data_utils import load_mimic_cxr_data
 
 
+def load_existing_results(output_file):
+    """
+    Load existing results from output file and return set of processed sample IDs.
+
+    Args:
+        output_file: Path to the output JSONL file
+
+    Returns:
+        tuple: (processed_ids, existing_results, stats)
+            - processed_ids: set of study_id-image_id combinations already processed
+            - existing_results: list of result dicts
+            - stats: dict with aggregated statistics from existing results
+    """
+    processed_ids = set()
+    existing_results = []
+    total_loss = 0.0
+    total_perplexity = 0.0
+    total_tokens = 0
+
+    if not os.path.exists(output_file):
+        return processed_ids, existing_results, {
+            'num_samples': 0,
+            'total_loss': 0.0,
+            'total_perplexity': 0.0,
+            'total_tokens': 0
+        }
+
+    with open(output_file, 'r') as f:
+        for line in f:
+            if line.strip():
+                result = json.loads(line)
+                existing_results.append(result)
+
+                # Create unique ID from study_id and image_id
+                study_id = result.get('study_id', '')
+                image_id = result.get('image_id', '')
+                unique_id = f"{study_id}_{image_id}"
+                processed_ids.add(unique_id)
+
+                # Aggregate statistics
+                total_loss += result.get('loss', 0.0)
+                total_perplexity += result.get('perplexity', 0.0)
+                total_tokens += result.get('valid_tokens', 0)
+
+    stats = {
+        'num_samples': len(existing_results),
+        'total_loss': total_loss,
+        'total_perplexity': total_perplexity,
+        'total_tokens': total_tokens
+    }
+
+    return processed_ids, existing_results, stats
+
+
 class MIMICEvalDataset(Dataset):
     """Dataset for batched MIMIC-CXR evaluation."""
 
@@ -373,8 +427,32 @@ def eval_model(args):
     model = model.to(torch.float16)
     model.eval()
 
+    # Prepare output
+    output_file = os.path.expanduser(args.output_file)
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    # Check for existing results and resume if requested
+    processed_ids, existing_results, existing_stats = load_existing_results(output_file)
+
+    if processed_ids and args.resume:
+        print(f"\n{'='*80}")
+        print(f"RESUMING EVALUATION")
+        print(f"Found {len(processed_ids)} already processed samples in {output_file}")
+        print(f"Existing stats:")
+        print(f"  - Average loss: {existing_stats['total_loss'] / existing_stats['num_samples']:.4f}")
+        print(f"  - Average perplexity: {existing_stats['total_perplexity'] / existing_stats['num_samples']:.4f}")
+        print(f"  - Total tokens: {existing_stats['total_tokens']}")
+        print(f"{'='*80}\n")
+    elif processed_ids and not args.resume:
+        print(f"\n{'='*80}")
+        print(f"WARNING: Found {len(processed_ids)} existing results in {output_file}")
+        print(f"Set --resume True to continue from where you left off, or the file will be overwritten.")
+        print(f"{'='*80}\n")
+        processed_ids = set()  # Don't skip anything, will overwrite
+        existing_stats = {'num_samples': 0, 'total_loss': 0.0, 'total_perplexity': 0.0, 'total_tokens': 0}
+
     # Load data
-    print(f"\nLoading MIMIC-CXR {args.split} data...")
+    print(f"Loading MIMIC-CXR {args.split} data...")
     print(f"Generation methods: {args.generation_methods}")
     data_list = load_mimic_cxr_data(
         data_path=args.data_file,
@@ -384,6 +462,21 @@ def eval_model(args):
         generation_methods=args.generation_methods,
         verbose=True
     )
+
+    # Filter out already processed samples if resuming
+    if args.resume and processed_ids:
+        original_count = len(data_list)
+        data_list = [
+            item for item in data_list
+            if f"{item.get('study_id', '')}_{item.get('image_id', '')}" not in processed_ids
+        ]
+        skipped_count = original_count - len(data_list)
+        print(f"Skipping {skipped_count} already processed samples")
+        print(f"Remaining samples to process: {len(data_list)}")
+
+    if len(data_list) == 0:
+        print("All samples already processed! Evaluation complete.")
+        return
 
     # Create dataset
     dataset = MIMICEvalDataset(
@@ -404,73 +497,74 @@ def eval_model(args):
         collate_fn=collate_fn_batched
     )
 
-    # Prepare output
-    output_file = os.path.expanduser(args.output_file)
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-    # Initialize tracking
-    all_results = []
-    total_loss = 0.0
-    total_perplexity = 0.0
-    total_tokens = 0
+    # Initialize tracking (start from existing stats if resuming)
+    num_samples = existing_stats['num_samples']
+    total_loss = existing_stats['total_loss']
+    total_perplexity = existing_stats['total_perplexity']
+    total_tokens = existing_stats['total_tokens']
 
     print(f"\nStarting batched evaluation on {len(dataset)} samples...")
     print(f"Batch size: {args.batch_size}")
     print(f"Compute loss: {args.compute_loss}")
     print(f"Results will be saved to: {output_file}")
+    if args.resume:
+        print(f"Resume mode: APPEND (starting from sample {num_samples + 1})")
+    else:
+        print(f"Resume mode: OVERWRITE")
     print("=" * 80)
 
-    # Evaluation loop
-    for batch in tqdm(dataloader, desc="Evaluating"):
-        batch_size = len(batch['metadata'])
+    # Open output file for incremental writing (append if resuming, overwrite otherwise)
+    file_mode = 'a' if args.resume else 'w'
+    with open(output_file, file_mode) as f:
+        # Evaluation loop
+        for batch in tqdm(dataloader, desc="Evaluating"):
+            batch_size = len(batch['metadata'])
 
-        # Compute loss if requested
-        if args.compute_loss:
-            losses, perplexities, token_counts = compute_loss_batch(
+            # Compute loss if requested
+            if args.compute_loss:
+                losses, perplexities, token_counts = compute_loss_batch(
+                    model,
+                    batch['full_input_ids'],
+                    batch['labels'],
+                    batch['images'],
+                    batch['image_sizes']
+                )
+            else:
+                losses = [0.0] * batch_size
+                perplexities = [0.0] * batch_size
+                token_counts = [0] * batch_size
+
+            # Generate predictions
+            predictions = generate_predictions_batch(
                 model,
-                batch['full_input_ids'],
-                batch['labels'],
+                tokenizer,
+                batch['input_ids'],
+                batch['attention_mask'],
                 batch['images'],
-                batch['image_sizes']
+                batch['image_sizes'],
+                args
             )
-        else:
-            losses = [0.0] * batch_size
-            perplexities = [0.0] * batch_size
-            token_counts = [0] * batch_size
 
-        # Generate predictions
-        predictions = generate_predictions_batch(
-            model,
-            tokenizer,
-            batch['input_ids'],
-            batch['attention_mask'],
-            batch['images'],
-            batch['image_sizes'],
-            args
-        )
+            # Write results immediately (incremental saving)
+            for i in range(batch_size):
+                result = {
+                    **batch['metadata'][i],
+                    'prediction': predictions[i],
+                    'loss': losses[i],
+                    'perplexity': perplexities[i],
+                    'valid_tokens': token_counts[i],
+                }
+                # Write to file immediately
+                f.write(json.dumps(result) + '\n')
+                f.flush()  # Ensure it's written to disk
 
-        # Collect results
-        for i in range(batch_size):
-            result = {
-                **batch['metadata'][i],
-                'prediction': predictions[i],
-                'loss': losses[i],
-                'perplexity': perplexities[i],
-                'valid_tokens': token_counts[i],
-            }
-            all_results.append(result)
+                # Update totals
+                num_samples += 1
+                total_loss += losses[i]
+                total_perplexity += perplexities[i]
+                total_tokens += token_counts[i]
 
-            total_loss += losses[i]
-            total_perplexity += perplexities[i]
-            total_tokens += token_counts[i]
-
-    # Write results
-    with open(output_file, 'w') as f:
-        for result in all_results:
-            f.write(json.dumps(result) + '\n')
-
-    # Compute averages
-    num_samples = len(all_results)
+    # Compute averages (num_samples already tracked incrementally)
     avg_loss = total_loss / num_samples if num_samples > 0 else 0.0
     avg_perplexity = total_perplexity / num_samples if num_samples > 0 else 0.0
 
@@ -537,6 +631,8 @@ if __name__ == "__main__":
 
     # Output arguments
     parser.add_argument("--output-file", type=str, required=True)
+    parser.add_argument("--resume", type=lambda x: x.lower() == 'true', default=False,
+                        help="Resume evaluation from existing results file (append mode)")
 
     # Batching arguments
     parser.add_argument("--batch-size", type=int, default=4,
