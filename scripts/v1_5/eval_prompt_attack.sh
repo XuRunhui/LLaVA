@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=llava_mimic_eval
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:l40s:1
+#SBATCH --gres=gpu:a40:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=03:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
@@ -26,21 +26,20 @@ MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 # ====================================
 # Data Configuration
 # ====================================
-# DATA_PATH_DEV="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_dev_p10_filtered.json"
+DATA_PATH_DEV="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_lora_128_gpt4_train/chat_train_p10_filtered_prompt_inversion_val.json"
 # DATA_PATH_TEST="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_test_p10_filtered.json"
-DATA_PATH_TRAIN="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_train_p10_filtered.json"
 IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/mimic-cxr-jpg/mimic-cxr-jpg/2.1.0/files/"
 
 # Extract checkpoint name for output directory
 CHECKPOINT_NAME=$(basename $MODEL_PATH)
-OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}_train"
+OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}"
 
 # ====================================
 # MIMIC-CXR Filtering Options
 # ====================================
-FILTER_VIEWS=True                    # Filter to only PA/AP views (recommended)
-INCLUDE_REASON=${2:-True}            # Include clinical indication in prompts
-GENERATION_METHODS=${3:-"gpt4"}      # Which generation method to evaluate: "gpt4", "rule-based", or "all"
+# Note: generation_methods is hardcoded to "rule-based" in eval script for test data
+FILTER_VIEWS=True         # Filter to only PA/AP views (recommended)
+INCLUDE_REASON=${2:-True}       # Include clinical indication in prompts
 
 # ====================================
 # Generation Configuration
@@ -60,37 +59,34 @@ mkdir -p $OUTPUT_DIR
 mkdir -p logs
 
 echo "=========================================="
-echo "MIMIC-CXR Training Set Evaluation"
+echo "MIMIC-CXR Evaluation"
 echo "=========================================="
 echo "Model: $MODEL_PATH"
 echo "Output directory: $OUTPUT_DIR"
-echo "Generation methods: $GENERATION_METHODS"
-echo "Filter views: $FILTER_VIEWS"
-echo "Include reason: $INCLUDE_REASON"
 echo "=========================================="
 echo ""
 
 # ====================================
-# Evaluate on Training Set
+# Evaluate on Dev Set
 # ====================================
-echo "Evaluating on Training set..."
+echo "Evaluating on DEV set..."
 echo "------------------------------------------"
 
 # Build command with optional top-p argument
 CMD="python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr.py \
     --model-path $MODEL_PATH \
     --model-base $MODEL_BASE \
-    --data-file $DATA_PATH_TRAIN \
+    --data-file $DATA_PATH_DEV \
     --image-folder $IMAGE_FOLDER \
-    --output-file $OUTPUT_DIR/train_results.jsonl \
-    --split train \
+    --output-file $OUTPUT_DIR/dev_results.jsonl \
+    --split dev \
     --filter-views $FILTER_VIEWS \
     --include-reason $INCLUDE_REASON \
-    --generation-methods $GENERATION_METHODS \
     --temperature $TEMPERATURE \
     --num-beams $NUM_BEAMS \
-    --max-new-tokens $MAX_NEW_TOKENS"
-
+    --max-new-tokens $MAX_NEW_TOKENS \
+    --generation-methods gpt4 
+"
 # Add top-p if defined
 if [ -n "${TOP_P+x}" ]; then
     CMD="$CMD --top-p $TOP_P"
@@ -102,9 +98,9 @@ CMD="$CMD --conv-mode $CONV_MODE"
 eval $CMD
 
 echo ""
-echo "TRAIN set evaluation complete!"
-echo "Results: $OUTPUT_DIR/train_results.jsonl"
-echo "Summary: $OUTPUT_DIR/train_results_summary.json"
+echo "DEV set evaluation complete!"
+echo "Results: $OUTPUT_DIR/dev_results.jsonl"
+echo "Summary: $OUTPUT_DIR/dev_results_summary.json"
 echo ""
 
 # # ====================================
