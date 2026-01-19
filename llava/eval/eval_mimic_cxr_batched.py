@@ -38,25 +38,20 @@ from mimic_data_utils import load_mimic_cxr_data
 
 def load_existing_results(output_file):
     """
-    Load existing results from output file and return set of processed sample IDs.
+    Load existing results from output file and return count + stats.
 
-    Args:
-        output_file: Path to the output JSONL file
-
-    Returns:
-        tuple: (processed_ids, existing_results, stats)
-            - processed_ids: set of study_id-image_id combinations already processed
-            - existing_results: list of result dicts
-            - stats: dict with aggregated statistics from existing results
+    Resume is based on the number of valid JSON lines, which matches
+    the number of completed samples written so far.
     """
-    processed_ids = set()
-    existing_results = []
+    existing_count = 0
     total_loss = 0.0
     total_perplexity = 0.0
     total_tokens = 0
+    invalid_json_lines = 0
+    missing_metric_lines = 0
 
     if not os.path.exists(output_file):
-        return processed_ids, existing_results, {
+        return 0, {
             'num_samples': 0,
             'total_loss': 0.0,
             'total_perplexity': 0.0,
@@ -65,29 +60,34 @@ def load_existing_results(output_file):
 
     with open(output_file, 'r') as f:
         for line in f:
-            if line.strip():
+            line = line.strip()
+            if not line:
+                continue
+            try:
                 result = json.loads(line)
-                existing_results.append(result)
+            except json.JSONDecodeError:
+                invalid_json_lines += 1
+                continue
+            existing_count += 1
+            if "loss" not in result or "perplexity" not in result or "valid_tokens" not in result:
+                missing_metric_lines += 1
+            total_loss += result.get('loss', 0.0)
+            total_perplexity += result.get('perplexity', 0.0)
+            total_tokens += result.get('valid_tokens', 0)
 
-                # Create unique ID from study_id and image_id
-                study_id = result.get('study_id', '')
-                image_id = result.get('image_id', '')
-                unique_id = f"{study_id}_{image_id}"
-                processed_ids.add(unique_id)
-
-                # Aggregate statistics
-                total_loss += result.get('loss', 0.0)
-                total_perplexity += result.get('perplexity', 0.0)
-                total_tokens += result.get('valid_tokens', 0)
+    if invalid_json_lines > 0:
+        print(f"Warning: found {invalid_json_lines} invalid JSON lines in {output_file}; resume will skip valid lines only.")
+    if missing_metric_lines > 0:
+        print(f"Warning: found {missing_metric_lines} lines missing metrics in {output_file}; summary may be partial.")
 
     stats = {
-        'num_samples': len(existing_results),
+        'num_samples': existing_count,
         'total_loss': total_loss,
         'total_perplexity': total_perplexity,
         'total_tokens': total_tokens
     }
 
-    return processed_ids, existing_results, stats
+    return existing_count, stats
 
 
 class MIMICEvalDataset(Dataset):
@@ -432,23 +432,25 @@ def eval_model(args):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     # Check for existing results and resume if requested
-    processed_ids, existing_results, existing_stats = load_existing_results(output_file)
+    existing_count, existing_stats = load_existing_results(output_file)
 
-    if processed_ids and args.resume:
+    if existing_count > 0 and args.resume:
         print(f"\n{'='*80}")
-        print(f"RESUMING EVALUATION")
-        print(f"Found {len(processed_ids)} already processed samples in {output_file}")
-        print(f"Existing stats:")
-        print(f"  - Average loss: {existing_stats['total_loss'] / existing_stats['num_samples']:.4f}")
-        print(f"  - Average perplexity: {existing_stats['total_perplexity'] / existing_stats['num_samples']:.4f}")
-        print(f"  - Total tokens: {existing_stats['total_tokens']}")
+        print("RESUMING EVALUATION")
+        print(f"Found {existing_count} already processed samples in {output_file}")
+        if existing_stats['num_samples'] > 0:
+            avg_loss = existing_stats['total_loss'] / existing_stats['num_samples']
+            avg_perplexity = existing_stats['total_perplexity'] / existing_stats['num_samples']
+            print("Existing stats:")
+            print(f"  - Average loss: {avg_loss:.4f}")
+            print(f"  - Average perplexity: {avg_perplexity:.4f}")
+            print(f"  - Total tokens: {existing_stats['total_tokens']}")
         print(f"{'='*80}\n")
-    elif processed_ids and not args.resume:
+    elif existing_count > 0 and not args.resume:
         print(f"\n{'='*80}")
-        print(f"WARNING: Found {len(processed_ids)} existing results in {output_file}")
-        print(f"Set --resume True to continue from where you left off, or the file will be overwritten.")
+        print(f"WARNING: Found {existing_count} existing results in {output_file}")
+        print("Set --resume True to continue from where you left off, or the file will be overwritten.")
         print(f"{'='*80}\n")
-        processed_ids = set()  # Don't skip anything, will overwrite
         existing_stats = {'num_samples': 0, 'total_loss': 0.0, 'total_perplexity': 0.0, 'total_tokens': 0}
 
     # Load data
@@ -463,13 +465,13 @@ def eval_model(args):
         verbose=True
     )
 
-    # Filter out already processed samples if resuming
-    if args.resume and processed_ids:
+    # Skip already processed samples based on output line count
+    if args.resume and existing_count > 0:
         original_count = len(data_list)
-        data_list = [
-            item for item in data_list
-            if f"{item.get('study_id', '')}_{item.get('image_id', '')}" not in processed_ids
-        ]
+        if existing_count >= original_count:
+            print("All samples already processed! Evaluation complete.")
+            return
+        data_list = data_list[existing_count:]
         skipped_count = original_count - len(data_list)
         print(f"Skipping {skipped_count} already processed samples")
         print(f"Remaining samples to process: {len(data_list)}")
@@ -507,14 +509,16 @@ def eval_model(args):
     print(f"Batch size: {args.batch_size}")
     print(f"Compute loss: {args.compute_loss}")
     print(f"Results will be saved to: {output_file}")
-    if args.resume:
-        print(f"Resume mode: APPEND (starting from sample {num_samples + 1})")
+    if args.resume and existing_count > 0:
+        print(f"Resume mode: APPEND (starting from sample {existing_count + 1})")
+    elif args.resume:
+        print("Resume mode: START (no existing entries)")
     else:
-        print(f"Resume mode: OVERWRITE")
+        print("Resume mode: OVERWRITE")
     print("=" * 80)
 
     # Open output file for incremental writing (append if resuming, overwrite otherwise)
-    file_mode = 'a' if args.resume else 'w'
+    file_mode = 'a' if args.resume and os.path.exists(output_file) else 'w'
     with open(output_file, file_mode) as f:
         # Evaluation loop
         for batch in tqdm(dataloader, desc="Evaluating"):

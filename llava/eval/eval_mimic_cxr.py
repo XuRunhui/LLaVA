@@ -211,6 +211,55 @@ def generate_prediction(model, tokenizer, input_ids, images, image_sizes, args):
     return prediction
 
 
+def load_existing_results(output_file):
+    """
+    Load existing JSONL results to support resume and metrics aggregation.
+
+    Returns:
+        existing_count: Number of valid JSON lines.
+        total_loss: Sum of loss * num_tokens over existing lines.
+        total_perplexity: Sum of perplexity * num_tokens over existing lines.
+        total_tokens: Sum of num_tokens over existing lines.
+    """
+    existing_count = 0
+    total_loss = 0.0
+    total_perplexity = 0.0
+    total_tokens = 0
+    invalid_json_lines = 0
+    missing_metric_lines = 0
+
+    if not os.path.exists(output_file):
+        return existing_count, total_loss, total_perplexity, total_tokens
+
+    with open(output_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                invalid_json_lines += 1
+                continue
+            existing_count += 1
+            num_tokens = data.get("num_tokens")
+            loss = data.get("loss")
+            perplexity = data.get("perplexity")
+            if num_tokens is None or loss is None or perplexity is None:
+                missing_metric_lines += 1
+                continue
+            total_tokens += num_tokens
+            total_loss += loss * num_tokens
+            total_perplexity += perplexity * num_tokens
+
+    if invalid_json_lines > 0:
+        print(f"Warning: found {invalid_json_lines} invalid JSON lines in {output_file}; they will be ignored for resume.")
+    if missing_metric_lines > 0:
+        print(f"Warning: found {missing_metric_lines} lines missing metrics in {output_file}; summary may be partial.")
+
+    return existing_count, total_loss, total_perplexity, total_tokens
+
+
 def eval_model(args):
     """
     Main evaluation function.
@@ -273,6 +322,29 @@ def eval_model(args):
         data_list = get_chunk(data_list, args.num_chunks, args.chunk_idx)
         print(f"Processing chunk {args.chunk_idx + 1}/{args.num_chunks} ({len(data_list)} samples)")
 
+    # Prepare output file path
+    output_file = os.path.expanduser(args.output_file)
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    # Resume if requested
+    existing_count = 0
+    total_loss = 0.0
+    total_perplexity = 0.0
+    total_tokens = 0
+    num_samples = 0
+    if args.resume and os.path.exists(output_file):
+        existing_count, total_loss, total_perplexity, total_tokens = load_existing_results(output_file)
+        if existing_count > 0:
+            print(f"Resuming from {output_file}: {existing_count} entries found.")
+            if existing_count >= len(data_list):
+                print("All samples appear to be processed already; no new samples to run.")
+            data_list = data_list[existing_count:]
+        num_samples = existing_count
+    else:
+        # Initialize output file (overwrite if exists)
+        with open(output_file, 'w') as f:
+            pass
+
     # Create dataset and dataloader
     dataset = MIMICEvalDataset(
         data_list,
@@ -291,23 +363,13 @@ def eval_model(args):
         collate_fn=collate_fn
     )
 
-    # Prepare output file
-    output_file = os.path.expanduser(args.output_file)
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-    # Initialize output file (overwrite if exists)
-    with open(output_file, 'w') as f:
-        pass
-
-    # Initialize metrics
-    total_loss = 0.0
-    total_perplexity = 0.0
-    total_tokens = 0
-    num_samples = 0
+    # Initialize metrics (may include resumed totals)
 
     print(f"\nStarting evaluation on {len(dataset)} samples...")
     print(f"Results will be saved to: {output_file}")
     print("=" * 80)
+    if existing_count > 0:
+        print(f"Skipped {existing_count} completed samples from existing output.")
 
     # Evaluation loop
     for batch_idx, (input_ids, full_input_ids, labels, images, image_sizes, metadata) in enumerate(tqdm(dataloader)):
@@ -424,6 +486,8 @@ if __name__ == "__main__":
 
     # Output arguments
     parser.add_argument("--output-file", type=str, required=True, help="Path to output JSONL file")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume from existing output file by skipping completed entries")
 
     # Chunking for distributed evaluation
     parser.add_argument("--num-chunks", type=int, default=1, help="Number of chunks to split data into")
