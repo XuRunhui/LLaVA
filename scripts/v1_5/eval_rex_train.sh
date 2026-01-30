@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --time=01:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
@@ -25,20 +25,18 @@ MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 # ====================================
 # Data Configuration
 # ====================================
-# DATA_PATH_TRAIN="/scratch1/runhuixu/rexgradient_train_no_reason.reason_from_indication.json"
-DATA_PATH_TRAIN="/project2/ruishanl_1185/SDP_for_VLM/datasets/physionet.org/files/llava-rad-mimic-cxr-annotation/1.0.0/chat_train_p10_filtered.json"
-# IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/deid_png"
-IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/mimic-cxr-jpg/mimic-cxr-jpg/2.1.0/files/"
+DATA_PATH_TRAIN="/scratch1/runhuixu/rexgradient_train_no_reason.reason_from_indication.json"
+IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/deid_png"
 
 # Extract checkpoint name for output directory
 CHECKPOINT_NAME=$(basename $MODEL_PATH)
-OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}_mimic_train_attacker_no_reason"
+OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}_rex_train_no_demo"
 
 # ====================================
 # MIMIC-CXR Filtering Options
 # ====================================
 FILTER_VIEWS=True                    # Filter to only PA/AP views (recommended)
-INCLUDE_REASON=${2:-False}            # Include clinical indication in prompts
+INCLUDE_REASON=${2:-True}            # Include clinical indication in prompts
 GENERATION_METHODS=${3:-"all"}      # Which generation method to evaluate: "gpt4", "rule-based", or "all"
 
 # ====================================

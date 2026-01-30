@@ -82,7 +82,7 @@ echo ""
 echo "Evaluating on TRAINING set (batched)..."
 echo "------------------------------------------"
 
-python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr_batched.py \
+python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr.py \
     --model-path $MODEL_PATH \
     --model-base $MODEL_BASE \
     --data-file $DATA_PATH_TRAIN \

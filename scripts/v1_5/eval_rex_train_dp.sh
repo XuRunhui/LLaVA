@@ -1,32 +1,11 @@
 #!/bin/bash
-#
-# MIMIC-CXR Training Set Batched Evaluation Script
-#
-# Usage:
-#   bash eval_mimic_train_batched.sh <model_path> [include_reason] [generation_methods] [batch_size] [resume]
-#
-# Arguments:
-#   model_path         : Path to model checkpoint (required)
-#   include_reason     : Include clinical indication (default: True)
-#   generation_methods : "gpt4", "rule-based", or "all" (default: "gpt4")
-#   batch_size         : Batch size for inference (default: 4)
-#   resume             : Resume from existing results (default: False, set to True to continue)
-#
-# Examples:
-#   # Start new evaluation
-#   bash eval_mimic_train_batched.sh /path/to/checkpoint True gpt4 4 False
-#
-#   # Resume from existing results (if evaluation was interrupted)
-#   bash eval_mimic_train_batched.sh /path/to/checkpoint True gpt4 4 True
-#
-
 #SBATCH --job-name=llava_mimic_eval_train_batched
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:l40s:1
+#SBATCH --gres=gpu:v100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
@@ -40,25 +19,25 @@ conda activate llava
 # ====================================
 # Model Configuration
 # ====================================
-MODEL_PATH=${1:-"/scratch1/runhuixu/outputs/llava_llavarad/lora_128_gpt4"}
+MODEL_PATH=${1:-"/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8"}
 MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 
 # ====================================
 # Data Configuration
 # ====================================
-DATA_PATH_TRAIN="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/ReXGradient/metadata/rexgradient_train_no_reason.json"
+DATA_PATH_TRAIN="/scratch1/runhuixu/rexgradient_train_no_reason.reason_from_indication.json"
 IMAGE_FOLDER="/project2/ruishanl_1185/SDP_for_VLM/datasets/rexgradient/deid_png"
 
 # Extract checkpoint name for output directory
 CHECKPOINT_NAME=$(basename $MODEL_PATH)
-OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}_rex_train_batched"
+OUTPUT_DIR="/scratch1/runhuixu/evaluation/llava_llavarad/eval_results_${CHECKPOINT_NAME}_rex_train_no_demo"
 
 # ====================================
 # MIMIC-CXR Filtering Options
 # ====================================
 FILTER_VIEWS=True                    # Filter to only PA/AP views (recommended)
 INCLUDE_REASON=${2:-True}            # Include clinical indication in prompts
-GENERATION_METHODS=${3:-"gpt4"}      # Which generation method to evaluate: "gpt4", "rule-based", or "all"
+GENERATION_METHODS=${3:-"all"}      # Which generation method to evaluate: "gpt4", "rule-based", or "all"
 
 # ====================================
 # Batching Configuration (NEW!)
@@ -104,7 +83,7 @@ echo ""
 echo "Evaluating on TRAINING set (batched)..."
 echo "------------------------------------------"
 
-python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr_batched.py \
+python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr.py \
     --model-path $MODEL_PATH \
     --model-base $MODEL_BASE \
     --data-file $DATA_PATH_TRAIN \
@@ -114,10 +93,7 @@ python /scratch1/runhuixu/LLaVA/llava/eval/eval_mimic_cxr_batched.py \
     --filter-views $FILTER_VIEWS \
     --include-reason $INCLUDE_REASON \
     --generation-methods $GENERATION_METHODS \
-    --batch-size $BATCH_SIZE \
-    --num-workers $NUM_WORKERS \
-    --compute-loss $COMPUTE_LOSS \
-    --resume $RESUME \
+    --resume \
     --temperature $TEMPERATURE \
     --num-beams $NUM_BEAMS \
     --max-new-tokens $MAX_NEW_TOKENS \

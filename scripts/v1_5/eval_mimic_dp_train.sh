@@ -19,7 +19,7 @@ conda activate llava
 # ====================================
 # Model Configuration
 # ====================================
-MODEL_PATH=${1:-"/scratch1/runhuixu/outputs/llava_llavarad/lora_128_gpt4"}
+MODEL_PATH=${1:-"/project2/ruishanl_1185/SDP_for_VLM/outputs/llava_llavarad/lora_128_dp_e8"}
 MODEL_BASE="liuhaotian/llava-v1.5-7b"  # Base model for LoRA
 
 # ====================================

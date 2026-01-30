@@ -59,7 +59,7 @@ DP_GHOST_CLIPPING=True       # Use ghost clipping for memory efficiency (recomme
 USE_MIMIC_LOADER=True            # Enable MIMIC-CXR specific data loader
 MIMIC_FILTER_VIEWS=True          # Filter to only PA/AP views (recommended)
 MIMIC_INCLUDE_REASON=True        # Include clinical indication/reason in prompts
-MIMIC_GENERATION_METHODS="gpt4"   # Options: "all", "gpt4", or "rule-based"
+MIMIC_GENERATION_METHODS="all"   # Options: "all", "gpt4", or "rule-based"
 
     # --tune_mm_mlp_adapter True 
 # deepspeed
